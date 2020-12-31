@@ -1,11 +1,10 @@
 package actors
 
-import actors.OnlineUsersBehavior.{RegisterAsOffline, RegisterAsOnline}
+import actors.OnlineUsersBehavior.RegisterAsOffline
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
-import akka.actor.typed.{ActorRef, Behavior, PostStop, SupervisorStrategy}
+import akka.actor.typed.{ActorRef, Behavior, PostStop}
 import akka.cluster.sharding.typed.ShardingEnvelope
 import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, Entity, EntityRef, EntityTypeKey}
-import akka.cluster.typed.{ClusterSingleton, SingletonActor}
 import akka.persistence.typed.PersistenceId
 import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior}
 import services.JwtService
@@ -137,8 +136,6 @@ object UserTokenEntity {
     context.log.info("starting userActor, userId: {}, token expire duration: {}", entityId, tokenExpireDuration)
     val userId = entityId.toLong
     val jwtService = new JwtService(config)
-    val onlineUsersActor = OnlineUsersBehavior.initSingleton(context.system)
-    onlineUsersActor ! RegisterAsOnline(userId)
 
     EventSourcedBehavior[Command, Event, State](
       persistenceId = persistenceId,
@@ -149,6 +146,7 @@ object UserTokenEntity {
       .receiveSignal {
         case (state, PostStop) =>
           context.log.info("user actor stopped, userId: {}", entityId)
+          val onlineUsersActor = OnlineUsersBehavior.initSingleton(context.system)
           onlineUsersActor ! RegisterAsOffline(userId)
       }
   }

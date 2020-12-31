@@ -26,7 +26,7 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
   implicit val timeout: Timeout = 3.seconds
 
   private def getOnlineUserCount =
-    (get & path("users" / "count")) {
+    (get & path("user" / "online" / "count")) {
       val onlineUsersActor = OnlineUsersBehavior.initSingleton(system)
       val onlineUserCountF = onlineUsersActor.ask(replyTo => GetOnlineUserCount(replyTo)).map(_.count)
       onComplete(onlineUserCountF) {

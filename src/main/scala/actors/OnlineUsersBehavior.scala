@@ -18,11 +18,11 @@ object OnlineUsersBehavior {
   // command
   sealed trait Command extends JacksonCborSerializable
 
-  final case class RegisterAsOnline(userId: Long) extends Command
-
   final case class RegisterAsOffline(userId: Long) extends Command
 
   final case class GetOnlineUserCount(replyTo: ActorRef[OnlineUserCount]) extends Command
+
+  final case class ApplyForTokenGeneration(userId: Long, replyTo: ActorRef[TokenGenerationApplyResult]) extends Command
 
   final case class BroadcastMessageToOnlineUsers(message: String) extends Command
 
@@ -31,18 +31,36 @@ object OnlineUsersBehavior {
 
   final case class OnlineUserCount(count: Int) extends Reply
 
+  sealed trait TokenGenerationApplyResult extends Reply
+
+  final case object TokenGenerationAllowed extends TokenGenerationApplyResult
+
+  final case object TokenGenerationRejected extends TokenGenerationApplyResult
+
 
   def apply(): Behavior[Command] = Behaviors.setup { context =>
     context.log.info("starting OnlineUsers actor")
+    val config = context.system.settings.config
+    val maxOnlineLimit = config.getInt("users.max-online-limit")
 
     def updated(users: Set[Long], userCount: Int): Behavior[Command] =
       Behaviors.receiveMessage[Command] {
-        case RegisterAsOnline(userId) =>
-          context.log.info("get RegisterAsOnline msg, userId: {}", userId)
-          updated(users + userId, userCount + 1)
         case RegisterAsOffline(userId) =>
           context.log.info("get RegisterAsOffline msg, userId: {}", userId)
           updated(users - userId, userCount - 1)
+        case ApplyForTokenGeneration(userId, replyTo) =>
+          if (users.contains(userId)) {
+            replyTo ! TokenGenerationAllowed
+            Behaviors.same
+          }
+          else if (userCount < maxOnlineLimit) {
+            replyTo ! TokenGenerationAllowed
+            updated(users + userId, userCount + 1)
+          }
+          else {
+            replyTo ! TokenGenerationRejected
+            Behaviors.same
+          }
         case GetOnlineUserCount(replyTo) =>
           replyTo ! OnlineUserCount(userCount)
           Behaviors.same

@@ -1,10 +1,10 @@
 
--- CREATE KEYSPACE IF NOT EXISTS auth_service_akka_journal WITH REPLICATION = { 'class' : 'SimpleStrategy','replication_factor':1 };
--- CREATE KEYSPACE IF NOT EXISTS auth_service_akka_snapshot WITH replication = {'class': 'SimpleStrategy', 'replication_factor' : 1 };
+-- CREATE KEYSPACE IF NOT EXISTS user_service_akka_journal WITH REPLICATION = { 'class' : 'SimpleStrategy','replication_factor':1 };
+-- CREATE KEYSPACE IF NOT EXISTS user_service_akka_snapshot WITH replication = {'class': 'SimpleStrategy', 'replication_factor' : 1 };
 
-CREATE KEYSPACE IF NOT EXISTS auth_service_akka_journal WITH replication = {'class': 'NetworkTopologyStrategy', 'dc1' : 3 };
+CREATE KEYSPACE IF NOT EXISTS user_service_akka_journal WITH replication = {'class': 'NetworkTopologyStrategy', 'dc1' : 3 };
 
-CREATE TABLE IF NOT EXISTS auth_service_akka_journal.messages (
+CREATE TABLE IF NOT EXISTS user_service_akka_journal.messages (
   persistence_id text,
   partition_nr bigint,
   sequence_nr bigint,
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS auth_service_akka_journal.messages (
     'min_sstable_size' : 50
     };
 
-CREATE TABLE IF NOT EXISTS auth_service_akka_journal.tag_views (
+CREATE TABLE IF NOT EXISTS user_service_akka_journal.tag_views (
   tag_name text,
   persistence_id text,
   sequence_nr bigint,
@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS auth_service_akka_journal.tag_views (
     'min_sstable_size' : 50
     };
 
-CREATE TABLE IF NOT EXISTS auth_service_akka_journal.tag_write_progress(
+CREATE TABLE IF NOT EXISTS user_service_akka_journal.tag_write_progress(
   persistence_id text,
   tag text,
   sequence_nr bigint,
@@ -72,22 +72,22 @@ CREATE TABLE IF NOT EXISTS auth_service_akka_journal.tag_write_progress(
   offset timeuuid,
   PRIMARY KEY (persistence_id, tag));
 
-CREATE TABLE IF NOT EXISTS auth_service_akka_journal.tag_scanning(
+CREATE TABLE IF NOT EXISTS user_service_akka_journal.tag_scanning(
   persistence_id text,
   sequence_nr bigint,
   PRIMARY KEY (persistence_id));
 
-CREATE TABLE IF NOT EXISTS auth_service_akka_journal.metadata(
+CREATE TABLE IF NOT EXISTS user_service_akka_journal.metadata(
   persistence_id text PRIMARY KEY,
   deleted_to bigint,
   properties map<text,text>);
 
-CREATE TABLE IF NOT EXISTS auth_service_akka_journal.all_persistence_ids(
+CREATE TABLE IF NOT EXISTS user_service_akka_journal.all_persistence_ids(
   persistence_id text PRIMARY KEY);
 
-CREATE KEYSPACE IF NOT EXISTS auth_service_akka_snapshot WITH replication = {'class': 'NetworkTopologyStrategy', 'dc1' : 3 };
+CREATE KEYSPACE IF NOT EXISTS user_service_akka_snapshot WITH replication = {'class': 'NetworkTopologyStrategy', 'dc1' : 3 };
 
-CREATE TABLE IF NOT EXISTS auth_service_akka_snapshot.snapshots (
+CREATE TABLE IF NOT EXISTS user_service_akka_snapshot.snapshots (
   persistence_id text,
   sequence_nr bigint,
   timestamp bigint,

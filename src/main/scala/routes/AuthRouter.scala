@@ -1,6 +1,6 @@
 package routes
 
-import actors.OnlineUsersBehavior.GetOnlineUserCount
+import actors.OnlineUsersBehavior.{ApplyForTokenGeneration, TokenGenerationAllowed, TokenGenerationRejected}
 import actors.UserTokenEntity._
 import actors.{OnlineUsersBehavior, UserTokenEntity}
 import akka.actor.typed.ActorSystem
@@ -36,21 +36,19 @@ class AuthRouter(jwtService: JwtService)(implicit ec: ExecutionContext, system: 
 
   val config = this.system.settings.config
 
-  val maxOnlineLimit = config.getInt("users.max-online-limit")
 
-  private def generateToken = (post & path("auth" / "token" / "generate") & parameter("userId")) { userId: String =>
+  private def generateToken = (post & path("user" / "auth" / "token" / "generate") & parameter("userId")) { userId: String =>
     val onlineUsersActor = OnlineUsersBehavior.initSingleton(system)
-    val onlineUserCountF = onlineUsersActor.ask(replyTo => GetOnlineUserCount(replyTo)).map(_.count)
     val tokenF: Future[String] =
-      onlineUserCountF.flatMap { count =>
-        if (count < this.maxOnlineLimit) {
-          val userTokenEntity = UserTokenEntity.selectEntity(userId.toLong, sharding)
-          userTokenEntity.ask(ref => GenerateToken("ip", "agent", ref)).map(_.value)
+      onlineUsersActor
+        .ask(replyTo => ApplyForTokenGeneration(userId.toLong, replyTo))
+        .flatMap {
+          case TokenGenerationAllowed =>
+            val userTokenEntity = UserTokenEntity.selectEntity(userId.toLong, sharding)
+            userTokenEntity.ask(ref => GenerateToken("ip", "agent", ref)).map(_.value)
+          case TokenGenerationRejected =>
+            Future.failed(new Exception("max online users reached, try some time later"))
         }
-        else {
-          Future.failed(new Exception("max online users reached, try some time later"))
-        }
-      }
     onComplete(tokenF) {
       case Success(token) =>
         complete(JsObject("code" -> JsNumber(0),
@@ -60,18 +58,18 @@ class AuthRouter(jwtService: JwtService)(implicit ec: ExecutionContext, system: 
           )
         ))
       case Failure(e) =>
-        log.warn("ask generate token failed, userId: {}, msg: {}, stack: {}", userId, e.getMessage, e.fillInStackTrace())
-        complete(status = StatusCodes.InternalServerError, e.getMessage)
+        log.warn("ask generate token failed, userId: {}, msg: {}, stack: {}", userId, e.getMessage, e.getStackTrace)
+        complete(status = StatusCodes.InternalServerError, JsObject("code" -> JsNumber(1), "msg" -> JsString(e.getMessage)))
     }
   }
 
-  private def invalidateToken = (post & path("auth" / "token" / "invalidate") & parameter("userId")) { userId: String =>
+  private def invalidateToken = (post & path("user" / "auth" / "token" / "invalidate") & parameter("userId")) { userId: String =>
     val userEntity = UserTokenEntity.selectEntity(userId.toLong, sharding)
     userEntity ! InvalidateToken
     complete(JsObject("code" -> JsNumber(0), "msg" -> JsString("success")))
   }
 
-  private def verifyToken = (get & path("auth" / "token" / "verify")) {
+  private def verifyToken = (get & path("user" / "auth" / "token" / "verify")) {
     optionalHeaderValueByName("Authorization") { tokenOpt: Option[String] =>
       tokenOpt
         .flatMap { token =>

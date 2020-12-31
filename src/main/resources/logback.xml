@@ -7,11 +7,11 @@
     </appender>
 
     <appender name="RollingFile" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>logs/auth-service.log.crn</file>
+        <file>logs/user-service.log.crn</file>
         <append>true</append>
         <immediateFlush>false</immediateFlush>
         <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
-            <fileNamePattern>logs/auth-service-%d{yyyyMMddHHmm}-%i.log</fileNamePattern>
+            <fileNamePattern>logs/user-service-%d{yyyyMMddHHmm}-%i.log</fileNamePattern>
             <maxFileSize>50MB</maxFileSize>
             <maxHistory>20</maxHistory>
             <totalSizeCap>3GB</totalSizeCap>
