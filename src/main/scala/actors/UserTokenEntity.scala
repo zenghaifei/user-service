@@ -39,7 +39,7 @@ object UserTokenEntity {
   final case class LatestTokenInfo(tokenId: Long, expireTime: LocalDateTime) extends Reply
 
   // event
-  sealed trait Event extends JacksonCborSerializable
+  sealed trait Event extends JacksonJsonSerializable
 
   final case class TokenGenerated(tokenId: Long, generateTime: LocalDateTime, ip: String, userAgent: String) extends Event
 

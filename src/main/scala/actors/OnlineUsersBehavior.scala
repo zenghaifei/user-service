@@ -4,7 +4,7 @@ import akka.actor.typed.scaladsl.Behaviors
 import akka.actor.typed.{ActorRef, ActorSystem, Behavior, SupervisorStrategy}
 import akka.cluster.typed.{ClusterSingleton, SingletonActor}
 
-import scala.collection.immutable.TreeSet
+import scala.collection.mutable
 
 /**
  * actors
@@ -37,13 +37,12 @@ object OnlineUsersBehavior {
 
   final case object TokenGenerationRejected extends TokenGenerationApplyResult
 
-
   def apply(): Behavior[Command] = Behaviors.setup { context =>
     context.log.info("starting OnlineUsers actor")
     val config = context.system.settings.config
     val maxOnlineLimit = config.getInt("users.max-online-limit")
 
-    def updated(users: Set[Long], userCount: Int): Behavior[Command] =
+    def updated(users: mutable.TreeSet[Long], userCount: Int): Behavior[Command] =
       Behaviors.receiveMessage[Command] {
         case RegisterAsOffline(userId) =>
           context.log.info("get RegisterAsOffline msg, userId: {}", userId)
@@ -55,7 +54,7 @@ object OnlineUsersBehavior {
           }
           else if (userCount < maxOnlineLimit) {
             replyTo ! TokenGenerationAllowed
-            updated(users + userId, userCount + 1)
+            updated(users.addOne(userId), userCount + 1)
           }
           else {
             replyTo ! TokenGenerationRejected
@@ -69,7 +68,7 @@ object OnlineUsersBehavior {
           Behaviors.same
       }
 
-    updated(TreeSet(), 0)
+    updated(mutable.TreeSet(), 0)
   }
 
   def initSingleton(system: ActorSystem[_]): ActorRef[Command] = {

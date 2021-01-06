@@ -9,7 +9,7 @@ import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
 import akka.util.Timeout
-import spray.json.{JsNumber, JsObject, JsString}
+import spray.json.{DefaultJsonProtocol, JsNumber, JsObject, JsString}
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.DurationInt
@@ -22,7 +22,15 @@ import scala.util.Success
  * @version 1.0, 2020/12/30
  * @since 0.4.1
  */
-class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extends SLF4JLogging with SprayJsonSupport {
+
+final case class UserRegisterRequest(username: String, password: String, phoneNumber: String, email: String,
+                                     gender: String, address: String, icon: String, introduction: String)
+
+trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
+  implicit val f1 = jsonFormat8(UserRegisterRequest)
+}
+
+class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extends SLF4JLogging with JsonSupport {
   implicit val timeout: Timeout = 3.seconds
 
   private def getOnlineUserCount =
@@ -36,6 +44,13 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
             "data" -> JsObject("count" -> JsNumber(count))))
       }
     }
+
+//  private def register = (post & path("user" / "register")) {
+//    entity(as[UserRegisterRequest]) {
+//      case UserRegisterRequest(username, password, phoneNumber, email, gender, address, icon, introduction) =>
+//        if (userName.size > 70)
+//    }
+//  }
 
   val routes: Route = concat(
     getOnlineUserCount
