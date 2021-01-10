@@ -1,11 +1,13 @@
 package actors
 
 import akka.actor.typed.scaladsl.Behaviors
-import akka.actor.typed.{ActorRef, Behavior}
+import akka.actor.typed.{ActorRef, Behavior, SupervisorStrategy}
 import akka.cluster.sharding.typed.ShardingEnvelope
 import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, Entity, EntityRef, EntityTypeKey}
 import akka.persistence.typed.PersistenceId
-import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior}
+import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, RetentionCriteria}
+
+import scala.concurrent.duration.DurationInt
 
 /**
  * actors
@@ -40,7 +42,7 @@ object UserInfoEntity {
   final case class GetUserInfoFailed(msg: String) extends GetUserInfoResult
 
   // event
-  sealed trait Event extends JacksonCborSerializable
+  sealed trait Event extends JacksonJsonSerializable
 
   final case class Inited(userInfo: UserInfo) extends Event
 
@@ -112,5 +114,7 @@ object UserInfoEntity {
       commandHandler = (state, command) => state.applyCommand(command, userId),
       eventHandler = (state, event) => state.applyEvent(event)
     )
+      .withRetention(RetentionCriteria.snapshotEvery(20, 1))
+      .onPersistFailure(SupervisorStrategy.restartWithBackoff(200.millis, 5.seconds, 0.1))
   }
 }

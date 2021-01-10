@@ -136,7 +136,6 @@ object UsersPersistentBehavior {
       commandHandler = (state, command) => state.handleCommand(command),
       eventHandler = (state, event) => state.handleEvent(event)
     )
-//      .withTagger()
       .withRetention(RetentionCriteria.snapshotEvery(500, 2))
       .onPersistFailure(SupervisorStrategy.restartWithBackoff(200.millis, 5.seconds, 0.1))
   }

@@ -2,14 +2,15 @@ package actors
 
 import actors.OnlineUsersBehavior.RegisterAsOffline
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
-import akka.actor.typed.{ActorRef, Behavior, PostStop}
+import akka.actor.typed.{ActorRef, Behavior, PostStop, SupervisorStrategy}
 import akka.cluster.sharding.typed.ShardingEnvelope
 import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, Entity, EntityRef, EntityTypeKey}
 import akka.persistence.typed.PersistenceId
-import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior}
+import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, RetentionCriteria}
 import services.JwtService
 
 import java.time.{Duration, LocalDateTime}
+import scala.concurrent.duration.DurationInt
 
 /**
  * actors
@@ -46,7 +47,7 @@ object UserTokenEntity {
   final case object TokenInvalidated extends Event
 
   // state
-  sealed trait State {
+  sealed trait State extends JacksonCborSerializable {
 
     def getLatestTokenId: Long
 
@@ -143,8 +144,10 @@ object UserTokenEntity {
       commandHandler = (state, command) => state.applyCommand(command, userId, jwtService, tokenExpireDuration, context),
       eventHandler = (state, event) => state.applyEvent(event, tokenExpireDuration)
     )
+      .withRetention(RetentionCriteria.snapshotEvery(20, 1))
+      .onPersistFailure(SupervisorStrategy.restartWithBackoff(200.millis, 5.seconds, 0.1))
       .receiveSignal {
-        case (state, PostStop) =>
+        case (_, PostStop) =>
           context.log.info("user actor stopped, userId: {}", entityId)
           val onlineUsersActor = OnlineUsersBehavior.initSingleton(context.system)
           onlineUsersActor ! RegisterAsOffline(userId)
