@@ -1,11 +1,12 @@
 package actors
 
-import akka.actor.typed.{ActorRef, Behavior}
 import akka.actor.typed.scaladsl.Behaviors
+import akka.actor.typed.{ActorRef, Behavior, SupervisorStrategy}
 import akka.persistence.typed.PersistenceId
-import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior}
+import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, RetentionCriteria}
 
 import scala.collection.mutable
+import scala.concurrent.duration.DurationInt
 
 /**
  * 维护所有用户的用户名、手机号、邮箱号、微信号等与userId的映射
@@ -63,7 +64,7 @@ object UsersPersistentBehavior {
                          emailIdMapping: mutable.TreeMap[String, Long] = mutable.TreeMap(),
                          var lastUserId: Long = 0) extends JacksonCborSerializable {
 
-    def handleCommand(command: Command):Effect[Event, State] = {
+    def handleCommand(command: Command): Effect[Event, State] = {
       command match {
         case msg: GetUserId =>
           val (userIdOpt, replyTo) = msg match {
@@ -135,6 +136,9 @@ object UsersPersistentBehavior {
       commandHandler = (state, command) => state.handleCommand(command),
       eventHandler = (state, event) => state.handleEvent(event)
     )
+//      .withTagger()
+      .withRetention(RetentionCriteria.snapshotEvery(500, 2))
+      .onPersistFailure(SupervisorStrategy.restartWithBackoff(200.millis, 5.seconds, 0.1))
   }
 
 }

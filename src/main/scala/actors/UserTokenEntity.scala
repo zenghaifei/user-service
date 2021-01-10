@@ -133,7 +133,7 @@ object UserTokenEntity {
   def apply(entityId: String, persistenceId: PersistenceId): Behavior[Command] = Behaviors.setup { context =>
     val config = context.system.settings.config
     val tokenExpireDuration = config.getDuration("users.token.expire-duration")
-    context.log.info("starting userActor, userId: {}, token expire duration: {}", entityId, tokenExpireDuration)
+    context.log.info("starting userTokenActor, userId: {}, token expire duration: {}", entityId, tokenExpireDuration)
     val userId = entityId.toLong
     val jwtService = new JwtService(config)
 

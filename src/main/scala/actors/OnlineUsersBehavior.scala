@@ -46,7 +46,7 @@ object OnlineUsersBehavior {
       Behaviors.receiveMessage[Command] {
         case RegisterAsOffline(userId) =>
           context.log.info("get RegisterAsOffline msg, userId: {}", userId)
-          updated(users - userId, userCount - 1)
+          updated(users.subtractOne(userId), userCount - 1)
         case ApplyForTokenGeneration(userId, replyTo) =>
           if (users.contains(userId)) {
             replyTo ! TokenGenerationAllowed
