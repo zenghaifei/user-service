@@ -15,7 +15,7 @@ import scala.concurrent.duration.DurationInt
  * @version 1.0, 2021/1/5
  * @since 0.4.1
  */
-object UsersPersistentBehavior {
+object UsersManagerPersistentBehavior {
 
   // command
   sealed trait Command extends JacksonCborSerializable
@@ -100,7 +100,6 @@ object UsersPersistentBehavior {
           }
           userInfo.userId = this.lastUserId + 1
           val userRegistered = UserRegistered(userInfo)
-          // todo: 将用户注册信息必达传给UserPersistentEntity
           Effect.persist(userRegistered).thenReply(replyTo)(_ => RegisterSuccess)
       }
     }
@@ -126,16 +125,19 @@ object UsersPersistentBehavior {
     }
   }
 
-  def persistenceId() = PersistenceId.ofUniqueId("users")
+  def persistenceId() = PersistenceId.ofUniqueId("users-manager")
+
+  def tag = "users-manager"
 
   def apply(): Behavior[Command] = Behaviors.setup { context =>
-    context.log.info("starting Users actor")
+    context.log.info("starting users-manager persistent actor")
     EventSourcedBehavior[Command, Event, State](
       persistenceId = persistenceId(),
       emptyState = State(),
       commandHandler = (state, command) => state.handleCommand(command),
       eventHandler = (state, event) => state.handleEvent(event)
     )
+      .withTagger(_ => Set(tag))
       .withRetention(RetentionCriteria.snapshotEvery(500, 2))
       .onPersistFailure(SupervisorStrategy.restartWithBackoff(200.millis, 5.seconds, 0.1))
   }

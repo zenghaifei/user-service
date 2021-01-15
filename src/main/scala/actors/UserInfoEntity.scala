@@ -81,7 +81,7 @@ object UserInfoEntity {
     override def applyCommand(command: Command, userId: Long): Effect[Event, State] = {
       command match {
         case Init(_, replyTo) =>
-          Effect.none.thenReply(replyTo)(_ => InitFailed("can't init on [InitedState]"))
+          Effect.none.thenReply(replyTo)(_ => InitSuccess)
         case GetUserInfo(replyTo) =>
           Effect.none.thenReply(replyTo)(_ => userInfo)
       }
