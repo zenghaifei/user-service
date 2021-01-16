@@ -28,11 +28,11 @@ import scala.util.{Failure, Success}
  * @since 0.4.1
  */
 
-final case class UserRegisterRequest(username: String, password: String, phoneNumber: String, email: String,
-                                     gender: String, address: String, icon: String, introduction: String)
+final case class UserRegisterRequest(username: Option[String], password: String, phoneNumber: Option[String], email: Option[String],
+                                     nickname: String, gender: Option[String], address: Option[String], icon: Option[String], introduction: Option[String])
 
 trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
-  implicit val f1 = jsonFormat8(UserRegisterRequest)
+  implicit val f1 = jsonFormat9(UserRegisterRequest)
 }
 
 class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extends SLF4JLogging with JsonSupport {
@@ -54,17 +54,18 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
 
   private def register = (post & path("user" / "register")) {
     entity(as[UserRegisterRequest]) {
-      case UserRegisterRequest(username, password, phoneNumber, email, gender, address, icon, introduction) =>
+      case UserRegisterRequest(usernameOpt, password, phoneNumberOpt, emailOpt, nickname, genderOpt, addressOpt, iconOpt, introductionOpt) =>
         val usersManagerActor = UsersManagerPersistentBehavior.initSingleton(system)
         val userInfo = UsersManagerPersistentBehavior.UserInfo(
-          username = username,
+          username = usernameOpt.getOrElse(""),
           password = password,
-          phoneNumber = phoneNumber,
-          email = email,
-          gender = gender,
-          address = address,
-          icon = icon,
-          introduction = introduction)
+          phoneNumber = phoneNumberOpt.getOrElse(""),
+          email = emailOpt.getOrElse(""),
+          nickname = nickname,
+          gender = genderOpt.getOrElse(""),
+          address = addressOpt.getOrElse(""),
+          icon = iconOpt.getOrElse(""),
+          introduction = introductionOpt.getOrElse(""))
         val registerResultF: Future[RegisterResult] = usersManagerActor.ask(replyTo => UsersManagerPersistentBehavior.RegisterUser(userInfo, replyTo))
         onComplete(registerResultF) {
           case Failure(e) =>
@@ -75,11 +76,11 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
               case RegisterSuccess =>
                 complete(JsObject("code" -> JsNumber(0), "msg" -> JsString("success")))
               case UsernameExist =>
-                complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"username ${username} registered by other users")))
+                complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"username ${usernameOpt.get} registered by other users")))
               case PhoneNumberExist =>
-                complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"phoneNumber ${phoneNumber} registered by other users")))
+                complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"phoneNumber ${phoneNumberOpt.get} registered by other users")))
               case EmailExist =>
-                complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"email ${email} registered by other users")))
+                complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"email ${emailOpt.get} registered by other users")))
             }
         }
     }
@@ -102,12 +103,13 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
                 case GetUserInfoFailed(msg) =>
                   this.log.warn("get user info failed, user not exist, userId: {}", userId)
                   complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(msg)))
-                case UserInfo(userId: Long, username: String, phoneNumber: String, email: String, loginPassword: String, gender: String, address: String, icon: String, introduction: String) =>
+                case UserInfo(userId: Long, username: String, phoneNumber: String, email: String, loginPassword: String, nickname: String, gender: String, address: String, icon: String, introduction: String) =>
                   complete(JsObject(
                     "code" -> JsNumber(0),
                     "msg" -> JsString("success"),
                     "data" -> JsObject(
                       "userId" -> JsNumber(userId),
+                      "nickname" -> JsString(nickname),
                       "gender" -> JsString(gender),
                       "icon" -> JsString(icon),
                       "introduction" -> JsString(introduction)

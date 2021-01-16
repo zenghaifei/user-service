@@ -30,7 +30,7 @@ object UsersManagerPersistentBehavior {
   final case class GetUserIdByEmail(email: String, replyTo: ActorRef[GetUserIdResult]) extends GetUserId
 
   final case class UserInfo(var userId: Long = 0L, username: String, password: String, phoneNumber: String, email: String,
-                            gender: String, address: String, icon: String, introduction: String)
+                            nickname: String, gender: String, address: String, icon: String, introduction: String)
 
   final case class RegisterUser(userInfo: UserInfo, replyTo: ActorRef[RegisterResult]) extends Command
 

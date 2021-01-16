@@ -37,7 +37,7 @@ object UserInfoEntity {
   sealed trait GetUserInfoResult extends Reply
 
   final case class UserInfo(userId: Long, username: String, phoneNumber: String, email: String, loginPassword: String,
-                            gender: String, address: String, icon: String, introduction: String) extends GetUserInfoResult
+                            nickname: String, gender: String, address: String, icon: String, introduction: String) extends GetUserInfoResult
 
   final case class GetUserInfoFailed(msg: String) extends GetUserInfoResult
 

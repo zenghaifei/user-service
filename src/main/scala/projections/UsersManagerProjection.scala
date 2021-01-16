@@ -54,10 +54,10 @@ class UsersManagerHander(system: ActorSystem[_]) extends Handler[EventEnvelope[U
 
   override def process(envelope: EventEnvelope[UsersManagerPersistentBehavior.Event]): Future[Done] = {
     envelope.event match {
-      case UserRegistered(UserInfo(userId, username, password, phoneNumber, email, gender, address, icon, introduction)) =>
+      case UserRegistered(UserInfo(userId, username, password, phoneNumber, email, nickname, gender, address, icon, introduction)) =>
         log.debug("userRegistered , userId: {}", userId)
         val userInfoEntity = UserInfoEntity.selectEntity(userId, sharding)
-        val userInfo1 = UserInfoEntity.UserInfo(userId, username, phoneNumber, email, password, gender, address, icon, introduction)
+        val userInfo1 = UserInfoEntity.UserInfo(userId, username, phoneNumber, email, password, nickname, gender, address, icon, introduction)
         userInfoEntity.ask(ref => UserInfoEntity.Init(userInfo1, ref))
           .map {
             case InitFailed(msg) =>
