@@ -1,19 +1,21 @@
 package routes
 
-import actors.OnlineUsersBehavior
+import actors.{OnlineUsersBehavior, UsersManagerPersistentBehavior}
 import actors.OnlineUsersBehavior.GetOnlineUserCount
+import actors.UsersManagerPersistentBehavior.{EmailExist, PhoneNumberExist, RegisterResult, RegisterSuccess, UsernameExist}
 import akka.actor.typed.ActorSystem
 import akka.actor.typed.scaladsl.AskPattern.{Askable, schedulerFromActorSystem}
 import akka.event.slf4j.SLF4JLogging
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
+import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
 import akka.util.Timeout
 import spray.json.{DefaultJsonProtocol, JsNumber, JsObject, JsString}
 
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration.DurationInt
-import scala.util.Success
+import scala.util.{Failure, Success}
 
 /**
  * routes
@@ -45,14 +47,41 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
       }
     }
 
-//  private def register = (post & path("user" / "register")) {
-//    entity(as[UserRegisterRequest]) {
-//      case UserRegisterRequest(username, password, phoneNumber, email, gender, address, icon, introduction) =>
-//        if (userName.size > 70)
-//    }
-//  }
+  private def register = (post & path("user" / "register")) {
+    entity(as[UserRegisterRequest]) {
+      case UserRegisterRequest(username, password, phoneNumber, email, gender, address, icon, introduction) =>
+        val usersManagerActor = UsersManagerPersistentBehavior.initSingleton(system)
+        val userInfo = UsersManagerPersistentBehavior.UserInfo(
+          username = username,
+          password = password,
+          phoneNumber = phoneNumber,
+          email = email,
+          gender = gender,
+          address = address,
+          icon = icon,
+          introduction = introduction)
+        val registerResultF: Future[RegisterResult] = usersManagerActor.ask(replyTo => UsersManagerPersistentBehavior.RegisterUser(userInfo, replyTo))
+        onComplete(registerResultF) {
+          case Failure(e) =>
+            this.log.warn("registerResult future failed, msg: {}, stack: {}", e.getMessage, e.getStackTrace)
+            complete(status = StatusCodes.InternalServerError, JsObject("code" -> JsNumber(1), "msg" -> JsString(e.getMessage)))
+          case Success(registerResult) =>
+            registerResult match {
+              case RegisterSuccess =>
+                complete(JsObject("code" -> JsNumber(0), "msg" -> JsString("success")))
+              case UsernameExist =>
+                complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"username ${username} registered by other users")))
+              case PhoneNumberExist =>
+                complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"phoneNumber ${phoneNumber} registered by other users")))
+              case EmailExist =>
+                complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"email ${email} registered by other users")))
+            }
+        }
+    }
+  }
 
   val routes: Route = concat(
-    getOnlineUserCount
+    getOnlineUserCount,
+    register
   )
 }

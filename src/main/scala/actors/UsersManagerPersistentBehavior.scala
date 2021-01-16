@@ -1,7 +1,8 @@
 package actors
 
 import akka.actor.typed.scaladsl.Behaviors
-import akka.actor.typed.{ActorRef, Behavior, SupervisorStrategy}
+import akka.actor.typed.{ActorRef, ActorSystem, Behavior, SupervisorStrategy}
+import akka.cluster.typed.{ClusterSingleton, SingletonActor}
 import akka.persistence.typed.PersistenceId
 import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, RetentionCriteria}
 
@@ -140,6 +141,13 @@ object UsersManagerPersistentBehavior {
       .withTagger(_ => Set(tag))
       .withRetention(RetentionCriteria.snapshotEvery(500, 2))
       .onPersistFailure(SupervisorStrategy.restartWithBackoff(200.millis, 5.seconds, 0.1))
+  }
+
+  def initSingleton(system: ActorSystem[_]): ActorRef[Command] = {
+    val singletonManager = ClusterSingleton(system)
+    singletonManager.init {
+      SingletonActor(Behaviors.supervise(UsersManagerPersistentBehavior()).onFailure[Exception](SupervisorStrategy.restart), "usersManager")
+    }
   }
 
 }

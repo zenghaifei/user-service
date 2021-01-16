@@ -32,8 +32,6 @@ class AuthRouter(jwtService: JwtService)(implicit ec: ExecutionContext, system: 
   implicit val timeout: Timeout = 3.seconds
 
   val sharding = ClusterSharding(system)
-  val userActorShardRegion = UserTokenEntity.shardRegion(sharding)
-
   val config = this.system.settings.config
 
 
