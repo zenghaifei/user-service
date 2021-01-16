@@ -44,7 +44,7 @@ object UserTokenEntity {
 
   final case class TokenGenerated(tokenId: Long, generateTime: LocalDateTime, ip: String, userAgent: String) extends Event
 
-  final case object TokenInvalidated extends Event
+  final case class TokenInvalidated(invalidateTime: LocalDateTime) extends Event
 
   // state
   sealed trait State extends JacksonCborSerializable {
@@ -55,7 +55,7 @@ object UserTokenEntity {
 
     def handleAdjustExpireTime(tokenId: Long, adjustTime: LocalDateTime, tokenExpireDuration: Duration): Unit
 
-    def handleInvalidateToken(): State
+    def handleTokenInvalidatedEvent(tokenInvalidated: TokenInvalidated): State
 
     def applyCommand(command: Command, userId: Long, jwtService: JwtService,
                      tokenExpireDuration: Duration, context: ActorContext[Command]): Effect[Event, State] = {
@@ -74,14 +74,19 @@ object UserTokenEntity {
           Effect.none.thenRun(_ => handleAdjustExpireTime(tokenId, adjustTime, tokenExpireDuration))
         case InvalidateToken =>
           context.log.info("invalidate token, userId: {}", userId)
-          Effect.persist(TokenInvalidated).thenStop()
+          this match {
+            case BlankState =>
+              Effect.none.thenStop()
+            case _ =>
+              Effect.persist(TokenInvalidated(LocalDateTime.now())).thenStop()
+          }
       }
     }
 
     def applyEvent(event: Event, tokenExpireDuration: Duration): State = event match {
       case TokenGenerated(tokenId, generateTime, ip, userAgent) =>
         GeneratedState(tokenId, generateTime.plus(tokenExpireDuration))
-      case TokenInvalidated => handleInvalidateToken()
+      case event: TokenInvalidated => handleTokenInvalidatedEvent(event)
       case _ =>
         throw new IllegalStateException(s"unexpected event [$event] in state [BlankState]")
     }
@@ -97,7 +102,7 @@ object UserTokenEntity {
       throw new IllegalArgumentException("Unexpected command [AdjustExpireTime] in state [BlankState]")
     }
 
-    override def handleInvalidateToken(): State = {
+    override def handleTokenInvalidatedEvent(tokenInvalidated: TokenInvalidated): State = {
       throw new IllegalArgumentException("Unexpected command [InvalidateToken] in state [BlankState]")
     }
   }
@@ -114,8 +119,8 @@ object UserTokenEntity {
       }
     }
 
-    override def handleInvalidateToken(): State = {
-      this.latestTokenExpireTime = LocalDateTime.now()
+    override def handleTokenInvalidatedEvent(tokenInvalidated: TokenInvalidated): State = {
+      this.latestTokenExpireTime = tokenInvalidated.invalidateTime
       this
     }
   }
