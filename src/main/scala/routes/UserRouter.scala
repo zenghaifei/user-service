@@ -1,16 +1,19 @@
 package routes
 
-import actors.{OnlineUsersBehavior, UsersManagerPersistentBehavior}
+import actors.{OnlineUsersBehavior, UserInfoEntity, UsersManagerPersistentBehavior}
 import actors.OnlineUsersBehavior.GetOnlineUserCount
+import actors.UserInfoEntity.{GetUserInfo, GetUserInfoFailed, UserInfo}
 import actors.UsersManagerPersistentBehavior.{EmailExist, PhoneNumberExist, RegisterResult, RegisterSuccess, UsernameExist}
 import akka.actor.typed.ActorSystem
 import akka.actor.typed.scaladsl.AskPattern.{Askable, schedulerFromActorSystem}
+import akka.cluster.sharding.typed.scaladsl.ClusterSharding
 import akka.event.slf4j.SLF4JLogging
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
 import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
 import akka.util.Timeout
+import constants.DefinedHeaders
 import spray.json.{DefaultJsonProtocol, JsNumber, JsObject, JsString}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -34,6 +37,8 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
 
 class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extends SLF4JLogging with JsonSupport {
   implicit val timeout: Timeout = 3.seconds
+
+  val sharding = ClusterSharding(system)
 
   private def getOnlineUserCount =
     (get & path("user" / "online" / "count")) {
@@ -80,8 +85,43 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
     }
   }
 
+  private def getUserInfo = (get & path("user" / "info")) {
+    optionalHeaderValueByName(DefinedHeaders.xForwardedUser) { userIdOpt: Option[String] =>
+      userIdOpt.map(_.toLong) match {
+        case None =>
+          complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"no header ${DefinedHeaders.xForwardedUser}")))
+        case Some(userId) =>
+          val userInfoEntity = UserInfoEntity.selectEntity(userId, sharding)
+          val userInfoResultF = userInfoEntity.ask(ref => GetUserInfo(ref))
+          onComplete(userInfoResultF) {
+            case Failure(e) =>
+              this.log.warn("get user info result future failed, userId: {}, msg: {}, stack: {}", userId, e.getMessage, e.getStackTrace)
+              complete(status = StatusCodes.InternalServerError, JsObject("code" -> JsNumber(1), "msg" -> JsString(e.getMessage)))
+            case Success(userInfoResult) =>
+              userInfoResult match {
+                case GetUserInfoFailed(msg) =>
+                  this.log.warn("get user info failed, user not exist, userId: {}", userId)
+                  complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(msg)))
+                case UserInfo(userId: Long, username: String, phoneNumber: String, email: String, loginPassword: String, gender: String, address: String, icon: String, introduction: String) =>
+                  complete(JsObject(
+                    "code" -> JsNumber(0),
+                    "msg" -> JsString("success"),
+                    "data" -> JsObject(
+                      "userId" -> JsNumber(userId),
+                      "gender" -> JsString(gender),
+                      "icon" -> JsString(icon),
+                      "introduction" -> JsString(introduction)
+                    )
+                  ))
+              }
+          }
+      }
+    }
+  }
+
   val routes: Route = concat(
     getOnlineUserCount,
-    register
+    register,
+    getUserInfo
   )
 }
