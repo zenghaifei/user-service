@@ -9,4 +9,9 @@ package constants
  */
 object DefinedHeaders {
   val xForwardedUser = "X-Forwarded-User"
+
+  val xRealIP = "X-REAL-IP";
+  val xForwardedFor = "X_FORWARDED_FOR"
+
+  val userAgent = "User-Agent"
 }

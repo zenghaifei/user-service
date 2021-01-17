@@ -1,9 +1,10 @@
 package routes
 
-import actors.{OnlineUsersBehavior, UserInfoEntity, UsersManagerPersistentBehavior}
 import actors.OnlineUsersBehavior.GetOnlineUserCount
 import actors.UserInfoEntity.{GetUserInfo, GetUserInfoFailed, UserInfo}
-import actors.UsersManagerPersistentBehavior.{EmailExist, PhoneNumberExist, RegisterResult, RegisterSuccess, UsernameExist}
+import actors.UserTokenEntity.GenerateToken
+import actors.UsersManagerPersistentBehavior._
+import actors.{OnlineUsersBehavior, UserInfoEntity, UserTokenEntity, UsersManagerPersistentBehavior}
 import akka.actor.typed.ActorSystem
 import akka.actor.typed.scaladsl.AskPattern.{Askable, schedulerFromActorSystem}
 import akka.cluster.sharding.typed.scaladsl.ClusterSharding
@@ -15,9 +16,11 @@ import akka.http.scaladsl.server.Route
 import akka.util.Timeout
 import constants.DefinedHeaders
 import spray.json.{DefaultJsonProtocol, JsNumber, JsObject, JsString}
+import utils.HashUtils.Sha256
+import utils.{HashUtils, StringUtils}
 
-import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration.DurationInt
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 /**
@@ -28,11 +31,14 @@ import scala.util.{Failure, Success}
  * @since 0.4.1
  */
 
-final case class UserRegisterRequest(username: Option[String], password: String, phoneNumber: Option[String], email: Option[String],
-                                     nickname: String, gender: Option[String], address: Option[String], icon: Option[String], introduction: Option[String])
+final case class RegisterRequest(username: Option[String], password: String, phoneNumber: Option[String], email: Option[String],
+                                 nickname: String, gender: Option[String], address: Option[String], icon: Option[String], introduction: Option[String])
+
+final case class LoginRequest(userIdentifier: String, password: String)
 
 trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
-  implicit val f1 = jsonFormat9(UserRegisterRequest)
+  implicit val f1 = jsonFormat9(RegisterRequest)
+  implicit val f2 = jsonFormat2(LoginRequest)
 }
 
 class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extends SLF4JLogging with JsonSupport {
@@ -53,12 +59,12 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
     }
 
   private def register = (post & path("user" / "register")) {
-    entity(as[UserRegisterRequest]) {
-      case UserRegisterRequest(usernameOpt, password, phoneNumberOpt, emailOpt, nickname, genderOpt, addressOpt, iconOpt, introductionOpt) =>
+    entity(as[RegisterRequest]) {
+      case RegisterRequest(usernameOpt, password, phoneNumberOpt, emailOpt, nickname, genderOpt, addressOpt, iconOpt, introductionOpt) =>
         val usersManagerActor = UsersManagerPersistentBehavior.initSingleton(system)
         val userInfo = UsersManagerPersistentBehavior.UserInfo(
           username = usernameOpt.getOrElse(""),
-          password = password,
+          password = HashUtils.computeHashFromString(password, Sha256),
           phoneNumber = phoneNumberOpt.getOrElse(""),
           email = emailOpt.getOrElse(""),
           nickname = nickname,
@@ -83,6 +89,77 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
                 complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"email ${emailOpt.get} registered by other users")))
             }
         }
+    }
+  }
+
+  private def login = (post & path("user" / "login")) {
+    optionalHeaderValueByName(DefinedHeaders.userAgent) { userAgentOpt: Option[String] =>
+      extractClientIP { clientRemoteAddress =>
+        entity(as[LoginRequest]) { case LoginRequest(userIdentifier, password) =>
+          lazy val usersManagerActor = UsersManagerPersistentBehavior.initSingleton(system)
+          val userIdResultF =
+            if (StringUtils.isValidCnPhoneNumberFormat(userIdentifier)) {
+              usersManagerActor.ask(ref => GetUserIdByPhoneNumber(userIdentifier, ref))
+            }
+            else if (StringUtils.isValidEmailFormat(userIdentifier)) {
+              usersManagerActor.ask(ref => GetUserIdByEmail(userIdentifier, ref))
+            }
+            else if (StringUtils.isValidUsernameFormat(userIdentifier)) {
+              usersManagerActor.ask(ref => GetUserIdByUsername(userIdentifier, ref))
+            }
+            else {
+              Future(UserNotFound)
+            }
+
+          val loginVerifiedUserIdF = userIdResultF
+            .flatMap {
+              case GetUserIdSuccess(userId) => Future.successful(userId)
+              case UserNotFound => Future.failed(new Exception("user not found"))
+            }
+            .flatMap { userId: Long =>
+              val userEntity = UserInfoEntity.selectEntity(userId, sharding)
+              userEntity.ask(ref => GetUserInfo(ref))
+                .map {
+                  case GetUserInfoFailed(msg) =>
+                    this.log.warn("unexpected get user info failed, msg: {}", msg)
+                    throw new Exception(msg)
+                  case userInfo: UserInfo => userInfo
+                }
+            }
+            .flatMap { userInfo: UserInfo =>
+              val hashedPassword = HashUtils.computeHashFromString(password, Sha256)
+              if (hashedPassword == userInfo.loginPassword) {
+                Future(userInfo.userId)
+              }
+              else {
+                Future.failed(new Exception("wrong username or password"))
+              }
+            }
+
+          val generateTokenF = loginVerifiedUserIdF
+            .flatMap { userId =>
+              val userTokenEntity = UserTokenEntity.selectEntity(userId, sharding)
+              val clientIP: String = clientRemoteAddress.toOption.map(_.getHostAddress).getOrElse("unknown")
+              val userAgent: String = userAgentOpt.getOrElse("unknown")
+              userTokenEntity.ask(ref => GenerateToken(clientIP, userAgent, ref))
+                .map(_.value)
+            }
+
+          onComplete(generateTokenF) {
+            case Failure(ex) =>
+              this.log.info("verify login failed, userIdentifier: {}, msg: {}, stack: {}", userIdentifier, ex.getMessage, ex.getStackTrace)
+              complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString("username or password error")))
+            case Success(token) =>
+              complete(JsObject(
+                "code" -> JsNumber(0),
+                "msg" -> JsString("login success"),
+                "data" -> JsObject(
+                  "token" -> JsString(token)
+                )
+              ))
+          }
+        }
+      }
     }
   }
 
@@ -124,6 +201,7 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
   val routes: Route = concat(
     getOnlineUserCount,
     register,
+    login,
     getUserInfo
   )
 }
