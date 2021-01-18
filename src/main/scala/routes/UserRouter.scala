@@ -49,7 +49,7 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
 
   val sharding = ClusterSharding(system)
 
-  private def getOnlineUserCount = (get & path("user" / "online" / "count")) {
+  private def getOnlineUserCount = (get & path("user" / "public" / "online" / "count")) {
     val onlineUsersActor = OnlineUsersBehavior.initSingleton(system)
     val onlineUserCountF = onlineUsersActor.ask(replyTo => GetOnlineUserCount(replyTo)).map(_.count)
     onComplete(onlineUserCountF) {
@@ -60,7 +60,7 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
     }
   }
 
-  private def register = (post & path("user" / "register")) {
+  private def register = (post & path("user" / "public" / "register")) {
     entity(as[RegisterRequest]) {
       case RegisterRequest(usernameOpt, password, phoneNumberOpt, emailOpt, nickname, genderOpt, addressOpt, iconOpt, introductionOpt) =>
         val usersManagerActor = UsersManagerPersistentBehavior.initSingleton(system)
@@ -94,7 +94,7 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
     }
   }
 
-  private def login = (post & path("user" / "login")) {
+  private def login = (post & path("user" / "public" / "login")) {
     optionalHeaderValueByName(DefinedHeaders.userAgent) { userAgentOpt: Option[String] =>
       extractClientIP { clientRemoteAddress =>
         entity(as[LoginRequest]) { case LoginRequest(userIdentifier, password) =>
