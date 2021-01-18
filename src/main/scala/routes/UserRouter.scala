@@ -2,7 +2,7 @@ package routes
 
 import actors.OnlineUsersBehavior.GetOnlineUserCount
 import actors.UserInfoEntity.{GetUserInfo, GetUserInfoFailed, UserInfo}
-import actors.UserTokenEntity.GenerateToken
+import actors.UserTokenEntity.{GenerateToken, InvalidateToken}
 import actors.UsersManagerPersistentBehavior._
 import actors.{OnlineUsersBehavior, UserInfoEntity, UserTokenEntity, UsersManagerPersistentBehavior}
 import akka.actor.typed.ActorSystem
@@ -163,6 +163,21 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
     }
   }
 
+  private def logout = (post & path("user" / "logout")) {
+    optionalHeaderValueByName(DefinedHeaders.xForwardedUser) { userIdOpt =>
+      userIdOpt
+        .map(_.toLong)
+        .map { userId =>
+          val userEntity = UserTokenEntity.selectEntity(userId, sharding)
+          userEntity ! InvalidateToken
+          complete(JsObject("code" -> JsNumber(0), "msg" -> JsString("success")))
+        }
+        .getOrElse {
+          complete(JsObject("code" -> JsNumber(1), "msg" -> JsString(s"user not exist")))
+        }
+    }
+  }
+
   private def getUserInfo = (get & path("user" / "info")) {
     optionalHeaderValueByName(DefinedHeaders.xForwardedUser) { userIdOpt: Option[String] =>
       userIdOpt.map(_.toLong) match {
@@ -202,6 +217,7 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
     getOnlineUserCount,
     register,
     login,
+    logout,
     getUserInfo
   )
 }

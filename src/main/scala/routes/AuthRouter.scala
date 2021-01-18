@@ -1,10 +1,8 @@
 package routes
 
-import actors.OnlineUsersBehavior.{ApplyForTokenGeneration, TokenGenerationAllowed, TokenGenerationRejected}
+import actors.UserTokenEntity
 import actors.UserTokenEntity._
-import actors.{OnlineUsersBehavior, UserTokenEntity}
 import akka.actor.typed.ActorSystem
-import akka.actor.typed.scaladsl.AskPattern.{Askable, schedulerFromActorSystem}
 import akka.cluster.sharding.typed.scaladsl.ClusterSharding
 import akka.event.slf4j.SLF4JLogging
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
@@ -14,7 +12,6 @@ import akka.http.scaladsl.server.Route
 import akka.util.Timeout
 import services.JwtService
 import services.JwtService.JwtClaims
-import spray.json.{JsNumber, JsObject, JsString}
 
 import java.time.LocalDateTime
 import scala.concurrent.duration.DurationInt
@@ -33,39 +30,6 @@ class AuthRouter(jwtService: JwtService)(implicit ec: ExecutionContext, system: 
 
   val sharding = ClusterSharding(system)
   val config = this.system.settings.config
-
-
-  private def generateToken = (post & path("user" / "auth" / "token" / "generate") & parameter("userId")) { userId: String =>
-    val onlineUsersActor = OnlineUsersBehavior.initSingleton(system)
-    val tokenF: Future[String] =
-      onlineUsersActor
-        .ask(replyTo => ApplyForTokenGeneration(userId.toLong, replyTo))
-        .flatMap {
-          case TokenGenerationAllowed =>
-            val userTokenEntity = UserTokenEntity.selectEntity(userId.toLong, sharding)
-            userTokenEntity.ask(ref => GenerateToken("ip", "agent", ref)).map(_.value)
-          case TokenGenerationRejected =>
-            Future.failed(new Exception("max online users reached, try some time later"))
-        }
-    onComplete(tokenF) {
-      case Success(token) =>
-        complete(JsObject("code" -> JsNumber(0),
-          "msg" -> JsString("success"),
-          "data" -> JsObject(
-            "token" -> JsString(token)
-          )
-        ))
-      case Failure(e) =>
-        log.warn("ask generate token failed, userId: {}, msg: {}, stack: {}", userId, e.getMessage, e.getStackTrace)
-        complete(status = StatusCodes.InternalServerError, JsObject("code" -> JsNumber(1), "msg" -> JsString(e.getMessage)))
-    }
-  }
-
-  private def invalidateToken = (post & path("user" / "auth" / "token" / "invalidate") & parameter("userId")) { userId: String =>
-    val userEntity = UserTokenEntity.selectEntity(userId.toLong, sharding)
-    userEntity ! InvalidateToken
-    complete(JsObject("code" -> JsNumber(0), "msg" -> JsString("success")))
-  }
 
   private def verifyToken = (get & path("user" / "auth" / "token" / "verify")) {
     optionalHeaderValueByName("Authorization") { tokenOpt: Option[String] =>
@@ -99,8 +63,6 @@ class AuthRouter(jwtService: JwtService)(implicit ec: ExecutionContext, system: 
   }
 
   val routes: Route = concat(
-    generateToken,
-    invalidateToken,
     verifyToken
   )
 }
