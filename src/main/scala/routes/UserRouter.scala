@@ -1,7 +1,7 @@
 package routes
 
 import actors.OnlineUsersBehavior.GetOnlineUserCount
-import actors.UserInfoEntity.{GetUserInfo, GetUserInfoFailed, UserInfo}
+import actors.UserInfoEntity.{GetUserInfo, GetUserInfoFailed, ModifyUserInfo, ModifyUserInfoFailed, ModifyUserInfoResult, ModifyUserInfoSuccess, UserInfo}
 import actors.UserTokenEntity.{GenerateToken, InvalidateToken}
 import actors.UsersManagerPersistentBehavior._
 import actors.{OnlineUsersBehavior, UserInfoEntity, UserTokenEntity, UsersManagerPersistentBehavior}
@@ -36,9 +36,12 @@ final case class RegisterRequest(username: Option[String], password: String, pho
 
 final case class LoginRequest(userIdentifier: String, password: String)
 
+final case class ModifyUserInfoRequest(nickname: Option[String], gender: Option[String], address: Option[String], icon: Option[String], introduction: Option[String])
+
 trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
   implicit val f1 = jsonFormat9(RegisterRequest)
   implicit val f2 = jsonFormat2(LoginRequest)
+  implicit val f3 = jsonFormat5(ModifyUserInfoRequest)
 }
 
 class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extends SLF4JLogging with JsonSupport {
@@ -46,17 +49,16 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
 
   val sharding = ClusterSharding(system)
 
-  private def getOnlineUserCount =
-    (get & path("user" / "online" / "count")) {
-      val onlineUsersActor = OnlineUsersBehavior.initSingleton(system)
-      val onlineUserCountF = onlineUsersActor.ask(replyTo => GetOnlineUserCount(replyTo)).map(_.count)
-      onComplete(onlineUserCountF) {
-        case Success(count) =>
-          complete(JsObject("code" -> JsNumber(0),
-            "msg" -> JsString("success"),
-            "data" -> JsObject("count" -> JsNumber(count))))
-      }
+  private def getOnlineUserCount = (get & path("user" / "online" / "count")) {
+    val onlineUsersActor = OnlineUsersBehavior.initSingleton(system)
+    val onlineUserCountF = onlineUsersActor.ask(replyTo => GetOnlineUserCount(replyTo)).map(_.count)
+    onComplete(onlineUserCountF) {
+      case Success(count) =>
+        complete(JsObject("code" -> JsNumber(0),
+          "msg" -> JsString("success"),
+          "data" -> JsObject("count" -> JsNumber(count))))
     }
+  }
 
   private def register = (post & path("user" / "register")) {
     entity(as[RegisterRequest]) {
@@ -213,11 +215,45 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
     }
   }
 
+  private def modifyUserInfo = (post & path("user" / "info" / "modify")) {
+    optionalHeaderValueByName(DefinedHeaders.xForwardedUser) { userIdOpt: Option[String] =>
+      userIdOpt.map(_.toLong) match {
+        case None =>
+          complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString("failed")))
+        case Some(userId) =>
+          entity(as[ModifyUserInfoRequest]) { request =>
+            val userInfoEntity = UserInfoEntity.selectEntity(userId, sharding)
+            val modifyResultF: Future[Unit] = userInfoEntity.ask[ModifyUserInfoResult](ref => ModifyUserInfo(
+              nickname = request.nickname.getOrElse(""),
+              gender = request.gender.getOrElse(""),
+              address = request.address.getOrElse(""),
+              icon = request.icon.getOrElse(""),
+              introduction = request.introduction.getOrElse(""),
+              replyTo = ref
+            ))
+              .flatMap {
+                case ModifyUserInfoFailed =>
+                  Future.failed(new Exception("ModifyUserInfoFailed response"))
+                case ModifyUserInfoSuccess => Future()
+              }
+            onComplete(modifyResultF) {
+              case Failure(ex) =>
+                log.warn("ask userInfoEntity failed, msg: {}, stack: {}", ex.getMessage, ex.getStackTrace)
+                complete(status = StatusCodes.InternalServerError, JsObject("code" -> JsNumber(1), "msg" -> JsString("failed")))
+              case Success(_) =>
+                complete(JsObject("code" -> JsNumber(0), "msg" -> JsString("success")))
+            }
+          }
+      }
+    }
+  }
+
   val routes: Route = concat(
     getOnlineUserCount,
     register,
     login,
     logout,
-    getUserInfo
+    getUserInfo,
+    modifyUserInfo
   )
 }

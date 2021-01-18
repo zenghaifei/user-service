@@ -25,6 +25,8 @@ object UserInfoEntity {
 
   final case class GetUserInfo(replyTo: ActorRef[GetUserInfoResult]) extends Command
 
+  final case class ModifyUserInfo(nickname: String, gender: String, address: String, icon: String, introduction: String, replyTo: ActorRef[ModifyUserInfoResult]) extends Command
+
   // reply
   sealed trait Reply extends JacksonCborSerializable
 
@@ -37,17 +39,26 @@ object UserInfoEntity {
   sealed trait GetUserInfoResult extends Reply
 
   final case class UserInfo(userId: Long, username: String, phoneNumber: String, email: String, loginPassword: String,
-                            nickname: String, gender: String, address: String, icon: String, introduction: String) extends GetUserInfoResult
+                            var nickname: String, var gender: String, var address: String, var icon: String, var introduction: String) extends GetUserInfoResult
 
   final case class GetUserInfoFailed(msg: String) extends GetUserInfoResult
+
+  sealed trait ModifyUserInfoResult extends Reply
+
+  final case object ModifyUserInfoSuccess extends ModifyUserInfoResult
+
+  final case object ModifyUserInfoFailed extends ModifyUserInfoResult
 
   // event
   sealed trait Event extends JacksonJsonSerializable
 
   final case class Inited(userInfo: UserInfo) extends Event
 
+  final case class UserInfoModified(nickname: String, gender: String, address: String, icon: String, introduction: String) extends Event
+
   // state
   sealed trait State extends JacksonCborSerializable {
+
     def applyCommand(command: Command, userId: Long): Effect[Event, State]
 
     def applyEvent(event: Event): State
@@ -67,6 +78,8 @@ object UserInfoEntity {
           }
         case GetUserInfo(replyTo) =>
           Effect.none.thenReply(replyTo)(_ => GetUserInfoFailed("no userInfo on [NotInitedState]"))
+        case ModifyUserInfo(nickname, gender, address, icon, introduction, replyTo) =>
+          Effect.none.thenReply(replyTo)(_ => ModifyUserInfoFailed)
       }
     }
 
@@ -84,12 +97,31 @@ object UserInfoEntity {
           Effect.none.thenReply(replyTo)(_ => InitSuccess)
         case GetUserInfo(replyTo) =>
           Effect.none.thenReply(replyTo)(_ => userInfo)
+        case ModifyUserInfo(nickname, gender, address, icon, introduction, replyTo) =>
+          Effect.persist(UserInfoModified(nickname, gender, address, icon, introduction)).thenReply(replyTo)(_ => ModifyUserInfoSuccess)
       }
     }
 
     override def applyEvent(event: Event): State = event match {
       case Inited(_) =>
         throw new IllegalArgumentException(s"Unexpected event [$event] on [InitedState]")
+      case UserInfoModified(nickname, gender, address, icon, introduction) =>
+        if (!nickname.isEmpty) {
+          this.userInfo.nickname = nickname
+        }
+        if (!gender.isEmpty) {
+          this.userInfo.gender = gender
+        }
+        if (!address.isEmpty) {
+          this.userInfo.address = address
+        }
+        if (!icon.isEmpty) {
+          this.userInfo.icon = icon
+        }
+        if (!introduction.isEmpty) {
+          this.userInfo.introduction = introduction
+        }
+        this
     }
   }
 
