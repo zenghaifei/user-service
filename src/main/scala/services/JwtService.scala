@@ -56,7 +56,7 @@ class JwtService(config: Config) extends SLF4JLogging {
       try {
         Some(this.verifier.verify(token))
       } catch {
-        case e: JWTVerificationException =>
+        case e: Throwable =>
           log.info(s"****, jwt verification error:${e}")
           None
       }
