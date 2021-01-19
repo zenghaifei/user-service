@@ -8,11 +8,11 @@ import akka.actor.typed.ActorSystem
 import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, ShardedDaemonProcess}
 import akka.event.slf4j.SLF4JLogging
 import akka.persistence.cassandra.query.scaladsl.CassandraReadJournal
-import akka.projection.{HandlerRecoveryStrategy, ProjectionBehavior, ProjectionId}
 import akka.projection.cassandra.scaladsl.CassandraProjection
 import akka.projection.eventsourced.EventEnvelope
 import akka.projection.eventsourced.scaladsl.EventSourcedProvider
 import akka.projection.scaladsl.Handler
+import akka.projection.{HandlerRecoveryStrategy, ProjectionBehavior, ProjectionId}
 import akka.util.Timeout
 
 import scala.concurrent.Future

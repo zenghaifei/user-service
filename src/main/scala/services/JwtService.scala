@@ -2,7 +2,6 @@ package services
 
 import akka.event.slf4j.SLF4JLogging
 import com.auth0.jwt.algorithms.Algorithm
-import com.auth0.jwt.exceptions.JWTVerificationException
 import com.auth0.jwt.{JWT, JWTVerifier}
 import com.typesafe.config.Config
 import services.JwtService.JwtClaims
