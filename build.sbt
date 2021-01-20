@@ -31,7 +31,6 @@ lazy val root = (project in file(".")).
       "com.typesafe.akka" %% "akka-actor-typed" % AkkaVersion,
       "com.typesafe.akka" %% "akka-stream-typed" % AkkaVersion,
       "ch.qos.logback" % "logback-classic" % "1.2.3",
-      "javax.ws.rs" % "javax.ws.rs-api" % "2.0.1",
       "com.auth0" % "java-jwt" % "3.10.3",
       "org.bouncycastle" % "bcprov-jdk16" % "1.46",
       "com.github.swagger-akka-http" %% "swagger-akka-http" % "2.2.0",

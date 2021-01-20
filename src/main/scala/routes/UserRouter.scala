@@ -1,7 +1,7 @@
 package routes
 
 import actors.OnlineUsersBehavior.GetOnlineUserCount
-import actors.UserInfoEntity.{UserInfo => _, apply => _, _}
+import actors.UserInfoEntity.{GetUserInfo, GetUserInfoFailed, ModifyUserInfo, ModifyUserInfoFailed, ModifyUserInfoResult, ModifyUserInfoSuccess, UserInfo}
 import actors.UserTokenEntity.{GenerateToken, InvalidateToken}
 import actors.UsersManagerPersistentBehavior._
 import actors.{OnlineUsersBehavior, UserInfoEntity, UserTokenEntity, UsersManagerPersistentBehavior}
