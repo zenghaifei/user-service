@@ -10,6 +10,7 @@ import akka.http.scaladsl.model._
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
 import akka.util.Timeout
+import constants.{DefinedHeaders, UserRoles}
 import services.JwtService
 import services.JwtService.JwtClaims
 
@@ -31,38 +32,51 @@ class AuthRouter(jwtService: JwtService)(implicit ec: ExecutionContext, system: 
   val sharding = ClusterSharding(system)
   val config = this.system.settings.config
 
-  private def verifyToken = (get & path("user" / "auth" / "token" / "verify")) {
-    optionalHeaderValueByName("Authorization") { tokenOpt: Option[String] =>
-      tokenOpt
-        .flatMap { token =>
-          val jwtToken = token.substring(7)
-          this.jwtService.decodeToken(jwtToken)
+  private def auth = (get & path("user" / "auth")) {
+    optionalHeaderValueByName(DefinedHeaders.authorization) { tokenOpt: Option[String] =>
+      optionalHeaderValueByName(DefinedHeaders.xOriginalURI) { uriOpt: Option[String] =>
+        val uriJwtClaimsOpt = for {
+          token <- tokenOpt
+          jwtClaims <- this.jwtService.decodeToken(token.substring(7))
+          uri <- uriOpt
+        } yield (uri, jwtClaims)
+        val routeF = uriJwtClaimsOpt match {
+          case None => Future(complete(HttpResponse(StatusCodes.Unauthorized)))
+          case Some((uri, JwtClaims(role, userId, tokenId))) =>
+            val rolePart = uri.split("/")(1)
+            val uriRole = rolePart match {
+              case UserRoles.ADMIN => rolePart
+              case _ => UserRoles.END_USER
+            }
+            if (uriRole != role) {
+              Future(complete(HttpResponse(StatusCodes.Forbidden)))
+            }
+            else {
+              val userTokenEntity = UserTokenEntity.selectEntity(userId, sharding)
+              userTokenEntity.ask(ref => GetLatestTokenInfo(ref))
+                .map { case LatestTokenInfo(latestTokenId, tokenExpireTime) =>
+                  val now = LocalDateTime.now()
+                  if (tokenId != latestTokenId || tokenExpireTime.isBefore(now)) {
+                    complete(HttpResponse(StatusCodes.Unauthorized))
+                  }
+                  else {
+                    userTokenEntity ! AdjustTokenExpireTime(tokenId, now)
+                    complete(HttpResponse(StatusCodes.OK, Seq(headers.RawHeader("X-Forwarded-User", userId.toString))))
+                  }
+                }
+            }
         }
-        .map { case JwtClaims(userId, tokenId) =>
-          val userTokenEntity = UserTokenEntity.selectEntity(userId.toLong, sharding)
-          val tokenInfoF: Future[LatestTokenInfo] = userTokenEntity.ask(ref => GetLatestTokenInfo(ref))
-          onComplete(tokenInfoF) {
-            case Success(LatestTokenInfo(latestTokenId, tokenExpireTime)) =>
-              val now = LocalDateTime.now()
-              if (tokenId != latestTokenId || tokenExpireTime.isBefore(now)) {
-                complete(HttpResponse(StatusCodes.Unauthorized))
-              }
-              else {
-                userTokenEntity ! AdjustTokenExpireTime(tokenId, now)
-                complete(HttpResponse(StatusCodes.OK, Seq(headers.RawHeader("X-Forwarded-User", userId.toString))))
-              }
-            case Failure(ex) =>
-              log.warn("ask get latest token info failed, userId: {}, msg: {}, stack: {}", userId, ex.getMessage, ex.fillInStackTrace())
-              complete(HttpResponse(StatusCodes.InternalServerError))
-          }
+        onComplete(routeF) {
+          case Success(route) => route
+          case Failure(ex) =>
+            log.warn("future failed, msg: {}, stack: {}", ex.getMessage, ex.fillInStackTrace())
+            complete(HttpResponse(StatusCodes.InternalServerError))
         }
-        .getOrElse {
-          complete(HttpResponse(StatusCodes.Unauthorized))
-        }
+      }
     }
   }
 
   val routes: Route = concat(
-    verifyToken
+    auth
   )
 }

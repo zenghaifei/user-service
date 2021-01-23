@@ -18,8 +18,9 @@ import java.time.LocalDateTime
  */
 object JwtService {
 
-  case class JwtClaims(userId: Long, tokenId: Long)
+  case class JwtClaims(role: String, userId: Long, tokenId: Long)
   object JwtClaims {
+    val role = "role"
     val userId = "userId"
     val tokenId = "tokenId"
   }
@@ -34,13 +35,14 @@ class JwtService(config: Config) extends SLF4JLogging {
 
   private val algorithm: Algorithm = Algorithm.HMAC256(secret)
 
-  def generateToken(userId: java.lang.Long, tokenId: java.lang.Long): String = {
+  def generateToken(role: java.lang.String, userId: java.lang.Long, tokenId: java.lang.Long): String = {
     val now = LocalDateTime.now()
     val expiresAt = now.plusHours(24 * 7)
     JWT.create()
       .withIssuer(this.issuer)
       .withIssuedAt(TimeUtils.toDate(now))
       .withExpiresAt(TimeUtils.toDate(expiresAt))
+      .withClaim(JwtClaims.role, role)
       .withClaim(JwtClaims.userId, userId)
       .withClaim(JwtClaims.tokenId, tokenId)
       .sign(this.algorithm)
@@ -63,9 +65,10 @@ class JwtService(config: Config) extends SLF4JLogging {
 
     decodedJwtOpt
       .map { decodedJwt =>
+        val role = decodedJwt.getClaim(JwtClaims.role).asString()
         val userId = decodedJwt.getClaim(JwtClaims.userId).asLong()
         val tokenId = decodedJwt.getClaim(JwtClaims.tokenId).asLong()
-        JwtClaims(userId = userId, tokenId = tokenId)
+        JwtClaims(role = role, userId = userId, tokenId = tokenId)
       }
   }
 }

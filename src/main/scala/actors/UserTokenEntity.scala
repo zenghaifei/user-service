@@ -7,6 +7,7 @@ import akka.cluster.sharding.typed.ShardingEnvelope
 import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, Entity, EntityRef, EntityTypeKey}
 import akka.persistence.typed.PersistenceId
 import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, RetentionCriteria}
+import constants.UserRoles
 import services.JwtService
 
 import java.time.{Duration, LocalDateTime}
@@ -63,7 +64,7 @@ object UserTokenEntity {
         case GenerateToken(ip, userAgent, replyTo) =>
           context.log.info("generate token request received, userId: {}, ip: {}, userAgent: {}, latestTokenId: {}", userId, ip, userAgent, getLatestTokenId)
           val newTokenId = getLatestTokenId + 1
-          val token = jwtService.generateToken(userId, newTokenId)
+          val token = jwtService.generateToken(UserRoles.END_USER, userId, newTokenId)
           val tokenGenerated = TokenGenerated(newTokenId, LocalDateTime.now(), ip, userAgent)
           Effect.persist(tokenGenerated).thenReply(replyTo)(_ => GeneratedToken(token))
         case GetLatestTokenInfo(replyTo) =>
