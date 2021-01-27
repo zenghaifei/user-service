@@ -1,10 +1,10 @@
 package routes
 
 import actors.OnlineUsersBehavior.GetOnlineUserCount
-import actors.UserInfoEntity.{GetUserInfo, GetUserInfoFailed, ModifyUserInfo, ModifyUserInfoFailed, ModifyUserInfoResult, ModifyUserInfoSuccess, UserInfo}
+import actors.UserInfoEntity.{apply => _, _}
 import actors.UserTokenEntity.{GenerateToken, InvalidateToken}
 import actors.UsersManagerPersistentBehavior._
-import actors.{OnlineUsersBehavior, UserInfoEntity, UserTokenEntity, UsersManagerPersistentBehavior}
+import actors._
 import akka.actor.typed.ActorSystem
 import akka.actor.typed.scaladsl.AskPattern.{Askable, schedulerFromActorSystem}
 import akka.cluster.sharding.typed.scaladsl.ClusterSharding
@@ -15,10 +15,12 @@ import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
 import akka.util.Timeout
 import constants.DefinedHeaders
+import services.MessagesService
 import spray.json.{DefaultJsonProtocol, JsNumber, JsObject, JsString}
 import utils.HashUtils.Sha256
 import utils.{HashUtils, StringUtils}
 
+import java.time.LocalDateTime
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
@@ -44,9 +46,11 @@ trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
   implicit val f3 = jsonFormat5(ModifyUserInfoRequest)
 }
 
-class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extends SLF4JLogging with JsonSupport {
+class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext, system: ActorSystem[_]) extends SLF4JLogging with JsonSupport {
   implicit val timeout: Timeout = 3.seconds
 
+  val config = this.system.settings.config
+  val registrationEmailCodeOverdueDuration = this.config.getDuration("users.registration.email-code-overdue-duration")
   val sharding = ClusterSharding(system)
 
   private def getOnlineUserCount = (get & path("user" / "public" / "online" / "count")) {
@@ -59,6 +63,30 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
           "data" -> JsObject("count" -> JsNumber(count))))
     }
   }
+
+  private def sendRegistrationEmailCode =
+    (post & path("user" / "public" / "register" / "email_code" / "send") & parameter("email")) { email =>
+      if (StringUtils.isInvalidEmailFormat(email)) {
+        complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"invalid email: ${email}")))
+      }
+      else {
+        val emailCodeEntity = EmailCodeEntity.selectEntity(email, this.sharding)
+        val now = LocalDateTime.now()
+        val overdueTime = now.plus(this.registrationEmailCodeOverdueDuration)
+        val emailCodeF = emailCodeEntity.ask(replyTo => EmailCodeEntity.GenerateEmailCode(overdueTime, replyTo))
+          .map(_.code)
+        val sendEmailF = emailCodeF.flatMap { emailCode =>
+          this.messagesService.sendInstantEmail(email, "注册邮箱验证码", s"您的注册邮箱验证码是<b>${emailCode}</b>", now, overdueTime)
+        }
+        onComplete(sendEmailF) {
+          case Failure(ex) =>
+            log.warn("send registration email code failed, email: {}, msg: {}, stack: {}", ex)
+            complete(status = StatusCodes.InternalServerError, JsObject("code" -> JsNumber(1), "msg" -> JsString(ex.getMessage)))
+          case Success(_) =>
+            complete(JsObject("code" -> JsNumber(0), "msg" -> JsString("success")))
+        }
+      }
+    }
 
   private def register = (post & path("user" / "public" / "register")) {
     entity(as[RegisterRequest]) {
@@ -125,10 +153,10 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
                   case GetUserInfoFailed(msg) =>
                     this.log.warn("unexpected get user info failed, msg: {}", msg)
                     throw new Exception(msg)
-                  case userInfo: UserInfo => userInfo
+                  case userInfo: UserInfoEntity.UserInfo => userInfo
                 }
             }
-            .flatMap { userInfo: UserInfo =>
+            .flatMap { userInfo: UserInfoEntity.UserInfo =>
               val hashedPassword = HashUtils.computeHashFromString(password, Sha256)
               if (hashedPassword == userInfo.loginPassword) {
                 Future(userInfo.userId)
@@ -197,7 +225,7 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
                 case GetUserInfoFailed(msg) =>
                   this.log.warn("get user info failed, user not exist, userId: {}", userId)
                   complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(msg)))
-                case UserInfo(userId: Long, username: String, phoneNumber: String, email: String, loginPassword: String, nickname: String, gender: String, address: String, icon: String, introduction: String) =>
+                case UserInfoEntity.UserInfo(userId: Long, username: String, phoneNumber: String, email: String, loginPassword: String, nickname: String, gender: String, address: String, icon: String, introduction: String) =>
                   complete(JsObject(
                     "code" -> JsNumber(0),
                     "msg" -> JsString("success"),
@@ -250,6 +278,7 @@ class UserRouter()(implicit ec: ExecutionContext, system: ActorSystem[_]) extend
 
   val routes: Route = concat(
     getOnlineUserCount,
+    sendRegistrationEmailCode,
     register,
     login,
     logout,
