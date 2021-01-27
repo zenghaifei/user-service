@@ -6,7 +6,7 @@ import akka.http.scaladsl.Http
 import com.github.swagger.akka.SwaggerSite
 import projections.UsersManagerProjection
 import routes.{AuthRouter, UserRouter}
-import services.JwtService
+import services.{JwtService, MessagesService}
 
 object App extends SwaggerSite {
 
@@ -22,7 +22,8 @@ object App extends SwaggerSite {
 
       val jwtService = new JwtService(config)
       val authRoute = new AuthRouter(jwtService).routes
-      val userRoute = new UserRouter().routes
+      val messagesService = new MessagesService(config)
+      val userRoute = new UserRouter(messagesService).routes
       val routes = concat(authRoute, userRoute)
       val host = "0.0.0.0"
       val port = config.getInt("server.port")

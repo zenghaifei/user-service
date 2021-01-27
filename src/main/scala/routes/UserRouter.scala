@@ -12,7 +12,7 @@ import akka.event.slf4j.SLF4JLogging
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
 import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.server.Directives._
-import akka.http.scaladsl.server.Route
+import akka.http.scaladsl.server.{Route, StandardRoute}
 import akka.util.Timeout
 import constants.DefinedHeaders
 import services.MessagesService
@@ -33,7 +33,7 @@ import scala.util.{Failure, Success}
  * @since 0.4.1
  */
 
-final case class RegisterRequest(username: Option[String], password: String, phoneNumber: Option[String], email: Option[String],
+final case class RegisterRequest(username: Option[String], password: String, phoneNumber: Option[String], phoneCode: Option[String], email: Option[String], emailCode: Option[String],
                                  nickname: String, gender: Option[String], address: Option[String], icon: Option[String], introduction: Option[String])
 
 final case class LoginRequest(userIdentifier: String, password: String)
@@ -41,7 +41,7 @@ final case class LoginRequest(userIdentifier: String, password: String)
 final case class ModifyUserInfoRequest(nickname: Option[String], gender: Option[String], address: Option[String], icon: Option[String], introduction: Option[String])
 
 trait JsonSupport extends SprayJsonSupport with DefaultJsonProtocol {
-  implicit val f1 = jsonFormat9(RegisterRequest)
+  implicit val f1 = jsonFormat11(RegisterRequest)
   implicit val f2 = jsonFormat2(LoginRequest)
   implicit val f3 = jsonFormat5(ModifyUserInfoRequest)
 }
@@ -51,7 +51,7 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
 
   val config = this.system.settings.config
   val registrationEmailCodeOverdueDuration = this.config.getDuration("users.registration.email-code-overdue-duration")
-  val sharding = ClusterSharding(system)
+  val clusterSharding = ClusterSharding(system)
 
   private def getOnlineUserCount = (get & path("user" / "public" / "online" / "count")) {
     val onlineUsersActor = OnlineUsersBehavior.initSingleton(system)
@@ -70,7 +70,7 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
         complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"invalid email: ${email}")))
       }
       else {
-        val emailCodeEntity = EmailCodeEntity.selectEntity(email, this.sharding)
+        val emailCodeEntity = EmailCodeEntity.selectEntity(email, this.clusterSharding)
         val now = LocalDateTime.now()
         val overdueTime = now.plus(this.registrationEmailCodeOverdueDuration)
         val emailCodeF = emailCodeEntity.ask(replyTo => EmailCodeEntity.GenerateEmailCode(overdueTime, replyTo))
@@ -88,27 +88,46 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
       }
     }
 
-  private def register = (post & path("user" / "public" / "register")) {
+  private def register: Route = (post & path("user" / "public" / "register")) {
     entity(as[RegisterRequest]) {
-      case RegisterRequest(usernameOpt, password, phoneNumberOpt, emailOpt, nickname, genderOpt, addressOpt, iconOpt, introductionOpt) =>
-        val usersManagerActor = UsersManagerPersistentBehavior.initSingleton(system)
-        val userInfo = UsersManagerPersistentBehavior.UserInfo(
-          username = usernameOpt.getOrElse(""),
-          password = HashUtils.computeHashFromString(password, Sha256),
-          phoneNumber = phoneNumberOpt.getOrElse(""),
-          email = emailOpt.getOrElse(""),
-          nickname = nickname,
-          gender = genderOpt.getOrElse(""),
-          address = addressOpt.getOrElse(""),
-          icon = iconOpt.getOrElse(""),
-          introduction = introductionOpt.getOrElse(""))
-        val registerResultF: Future[RegisterResult] = usersManagerActor.ask(replyTo => UsersManagerPersistentBehavior.RegisterUser(userInfo, replyTo))
-        onComplete(registerResultF) {
-          case Failure(e) =>
-            this.log.warn("registerResult future failed, msg: {}, stack: {}", e.getMessage, e.getStackTrace)
-            complete(status = StatusCodes.InternalServerError, JsObject("code" -> JsNumber(1), "msg" -> JsString(e.getMessage)))
-          case Success(registerResult) =>
-            registerResult match {
+      case RegisterRequest(usernameOpt, password, phoneNumberOpt, phoneCodeOpt, emailOpt, emailCodeOpt, nickname, genderOpt, addressOpt, iconOpt, introductionOpt) =>
+        if (emailOpt.isEmpty && phoneNumberOpt.isEmpty) {
+          return complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString("请补充邮箱或手机号码")))
+        }
+        val emailCodeVerifyResultF =
+          emailOpt.fold(Future(true)) { email =>
+            emailCodeOpt.fold(Future(false)) { emailCode =>
+              val emailCodeEntity = EmailCodeEntity.selectEntity(email, this.clusterSharding)
+              emailCodeEntity.ask(replyTo => EmailCodeEntity.GetEmailCode(replyTo))
+                .map(_.codeData)
+                .map { case EmailCodeEntity.CodeData(code, overdueTime) =>
+                  if (overdueTime.isBefore(LocalDateTime.now()))
+                    false
+                  else if (code != emailCode)
+                    false
+                  else
+                    true
+                }
+            }
+          }
+
+        val registerResultF: Future[StandardRoute] = emailCodeVerifyResultF.flatMap {
+          case false =>
+            Future(complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString("邮箱验证码错误"))))
+          case true =>
+            val usersManagerActor = UsersManagerPersistentBehavior.initSingleton(system)
+            val userInfo = UsersManagerPersistentBehavior.UserInfo(
+              username = usernameOpt.getOrElse(""),
+              password = HashUtils.computeHashFromString(password, Sha256),
+              phoneNumber = phoneNumberOpt.getOrElse(""),
+              email = emailOpt.getOrElse(""),
+              nickname = nickname,
+              gender = genderOpt.getOrElse(""),
+              address = addressOpt.getOrElse(""),
+              icon = iconOpt.getOrElse(""),
+              introduction = introductionOpt.getOrElse(""))
+            usersManagerActor.ask(replyTo => UsersManagerPersistentBehavior.RegisterUser(userInfo, replyTo))
+            .map {
               case RegisterSuccess =>
                 complete(JsObject("code" -> JsNumber(0), "msg" -> JsString("success")))
               case UsernameExist =>
@@ -119,6 +138,13 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
                 complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"email ${emailOpt.get} registered by other users")))
             }
         }
+
+        onComplete(registerResultF) {
+            case Failure(e) =>
+              this.log.warn("registerResult future failed, msg: {}, stack: {}", e.getMessage, e.getStackTrace)
+              complete(status = StatusCodes.InternalServerError, JsObject("code" -> JsNumber(1), "msg" -> JsString(e.getMessage)))
+            case Success(registerResult) => registerResult
+          }
     }
   }
 
@@ -147,7 +173,7 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
               case UserNotFound => Future.failed(new Exception("user not found"))
             }
             .flatMap { userId: Long =>
-              val userEntity = UserInfoEntity.selectEntity(userId, sharding)
+              val userEntity = UserInfoEntity.selectEntity(userId, clusterSharding)
               userEntity.ask(ref => GetUserInfo(ref))
                 .map {
                   case GetUserInfoFailed(msg) =>
@@ -168,7 +194,7 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
 
           val generateTokenF = loginVerifiedUserIdF
             .flatMap { userId =>
-              val userTokenEntity = UserTokenEntity.selectEntity(userId, sharding)
+              val userTokenEntity = UserTokenEntity.selectEntity(userId, clusterSharding)
               val clientIP: String = clientRemoteAddress.toOption.map(_.getHostAddress).getOrElse("unknown")
               val userAgent: String = userAgentOpt.getOrElse("unknown")
               userTokenEntity.ask(ref => GenerateToken(clientIP, userAgent, ref))
@@ -198,7 +224,7 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
       userIdOpt
         .map(_.toLong)
         .map { userId =>
-          val userEntity = UserTokenEntity.selectEntity(userId, sharding)
+          val userEntity = UserTokenEntity.selectEntity(userId, clusterSharding)
           userEntity ! InvalidateToken
           complete(JsObject("code" -> JsNumber(0), "msg" -> JsString("success")))
         }
@@ -214,7 +240,7 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
         case None =>
           complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"no header ${DefinedHeaders.xForwardedUser}")))
         case Some(userId) =>
-          val userInfoEntity = UserInfoEntity.selectEntity(userId, sharding)
+          val userInfoEntity = UserInfoEntity.selectEntity(userId, clusterSharding)
           val userInfoResultF = userInfoEntity.ask(ref => GetUserInfo(ref))
           onComplete(userInfoResultF) {
             case Failure(e) =>
@@ -250,7 +276,7 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
           complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString("failed")))
         case Some(userId) =>
           entity(as[ModifyUserInfoRequest]) { request =>
-            val userInfoEntity = UserInfoEntity.selectEntity(userId, sharding)
+            val userInfoEntity = UserInfoEntity.selectEntity(userId, clusterSharding)
             val modifyResultF: Future[Unit] = userInfoEntity.ask[ModifyUserInfoResult](ref => ModifyUserInfo(
               nickname = request.nickname.getOrElse(""),
               gender = request.gender.getOrElse(""),
