@@ -57,7 +57,7 @@ object EmailCodeEntity {
     def applyCommand(command: Command): Effect[Event, State] = {
       command match {
         case GenerateEmailCode(overdueTime, replyTo) =>
-          val code = StringUtils.generateEmailCode()
+          val code = StringUtils.generateEmailCode().toLowerCase
           val codeGenerated = EmailCodeGenerated(code, overdueTime)
           Effect.persist(codeGenerated).thenReply(replyTo)(_ => GenerateCodeResult(code))
         case GetEmailCode(replyTo) =>
