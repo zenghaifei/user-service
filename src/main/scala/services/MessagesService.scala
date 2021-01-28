@@ -41,7 +41,7 @@ class MessagesService(config: Config)(implicit system: ActorSystem[_]) extends S
     )
     Http().singleRequest(request)
       .flatMap { response =>
-        if (response.status != 200) {
+        if (response.status.isFailure()) {
           Unmarshal(response).to[String]
             .map { responseStr =>
               val errorMsg = s"request failed, uri: ${request.uri}, request params: $requestParamStr, response: $responseStr"
