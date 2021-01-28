@@ -1,6 +1,6 @@
 val AppVersion = "0.1.0"
 val AkkaVersion = "2.6.10"
-val AkkaHttpVersion = "10.2.1"
+val AkkaHttpVersion = "10.2.3"
 
 val Env = sys.env.get("env").getOrElse("test")
 val ImageVersion = if (Env == "test") s"test-$AppVersion" else AppVersion

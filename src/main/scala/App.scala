@@ -1,4 +1,4 @@
-import actors.{UserInfoEntity, UserTokenEntity}
+import actors.{EmailCodeEntity, UserInfoEntity, UserTokenEntity}
 import akka.actor.typed.ActorSystem
 import akka.actor.typed.scaladsl.Behaviors
 import akka.cluster.sharding.typed.scaladsl.ClusterSharding
@@ -19,6 +19,7 @@ object App extends SwaggerSite {
       val sharding = ClusterSharding(system)
       UserTokenEntity.shardRegion(sharding)
       UserInfoEntity.shardRegion(sharding)
+      EmailCodeEntity.shardRegion(sharding)
 
       val jwtService = new JwtService(config)
       val authRoute = new AuthRouter(jwtService).routes

@@ -92,59 +92,70 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
     entity(as[RegisterRequest]) {
       case RegisterRequest(usernameOpt, password, phoneNumberOpt, phoneCodeOpt, emailOpt, emailCodeOpt, nickname, genderOpt, addressOpt, iconOpt, introductionOpt) =>
         if (emailOpt.isEmpty && phoneNumberOpt.isEmpty) {
-          return complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString("请补充邮箱或手机号码")))
+          complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString("请补充邮箱或手机号码")))
         }
-        val emailCodeVerifyResultF =
-          emailOpt.fold(Future(true)) { email =>
-            emailCodeOpt.fold(Future(false)) { emailCode =>
-              val emailCodeEntity = EmailCodeEntity.selectEntity(email, this.clusterSharding)
-              emailCodeEntity.ask(replyTo => EmailCodeEntity.GetEmailCode(replyTo))
-                .map(_.codeData)
-                .map { case EmailCodeEntity.CodeData(code, overdueTime) =>
-                  if (overdueTime.isBefore(LocalDateTime.now()))
-                    false
-                  else if (code != emailCode)
-                    false
-                  else
-                    true
-                }
+        else {
+          val emailCodeVerifyResultF =
+            emailOpt.fold(Future(true)) { email =>
+              emailCodeOpt.fold(Future(false)) { emailCode =>
+                val emailCodeEntity = EmailCodeEntity.selectEntity(email, this.clusterSharding)
+                emailCodeEntity.ask(replyTo => EmailCodeEntity.GetEmailCode(replyTo))
+                  .map(_.codeData)
+                  .map { case EmailCodeEntity.CodeData(code, overdueTime) =>
+                    if (overdueTime.isBefore(LocalDateTime.now()))
+                      false
+                    else if (code != emailCode)
+                      false
+                    else
+                      true
+                  }
+              }
             }
+
+          val registerResultF: Future[StandardRoute] = emailCodeVerifyResultF.flatMap {
+            case false =>
+              Future(complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString("邮箱验证码错误"))))
+            case true =>
+              val usersManagerActor = UsersManagerPersistentBehavior.initSingleton(system)
+              val userInfo = UsersManagerPersistentBehavior.UserInfo(
+                username = usernameOpt.getOrElse(""),
+                password = HashUtils.computeHashFromString(password, Sha256),
+                phoneNumber = phoneNumberOpt.getOrElse(""),
+                email = emailOpt.getOrElse(""),
+                nickname = nickname,
+                gender = genderOpt.getOrElse(""),
+                address = addressOpt.getOrElse(""),
+                icon = iconOpt.getOrElse(""),
+                introduction = introductionOpt.getOrElse(""))
+              usersManagerActor.ask(replyTo => UsersManagerPersistentBehavior.RegisterUser(userInfo, replyTo))
+                .flatMap {
+                  case RegisterSuccess =>
+                    if (emailCodeOpt.isDefined) {
+                      val emailCodeEntity = EmailCodeEntity.selectEntity(emailCodeOpt.get, this.clusterSharding)
+                      emailCodeEntity.ask(replyTo => EmailCodeEntity.InvalidateEmailCode(replyTo))
+                        .map { _ =>
+                          complete(JsObject("code" -> JsNumber(0), "msg" -> JsString("success")))
+                        }
+                    }
+                    else {
+                      Future(complete(JsObject("code" -> JsNumber(0), "msg" -> JsString("success"))))
+                    }
+                  case UsernameExist =>
+                    Future(complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"username ${usernameOpt.get} registered by other users"))))
+                  case PhoneNumberExist =>
+                    Future(complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"phoneNumber ${phoneNumberOpt.get} registered by other users"))))
+                  case EmailExist =>
+                    Future(complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"email ${emailOpt.get} registered by other users"))))
+                }
           }
 
-        val registerResultF: Future[StandardRoute] = emailCodeVerifyResultF.flatMap {
-          case false =>
-            Future(complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString("邮箱验证码错误"))))
-          case true =>
-            val usersManagerActor = UsersManagerPersistentBehavior.initSingleton(system)
-            val userInfo = UsersManagerPersistentBehavior.UserInfo(
-              username = usernameOpt.getOrElse(""),
-              password = HashUtils.computeHashFromString(password, Sha256),
-              phoneNumber = phoneNumberOpt.getOrElse(""),
-              email = emailOpt.getOrElse(""),
-              nickname = nickname,
-              gender = genderOpt.getOrElse(""),
-              address = addressOpt.getOrElse(""),
-              icon = iconOpt.getOrElse(""),
-              introduction = introductionOpt.getOrElse(""))
-            usersManagerActor.ask(replyTo => UsersManagerPersistentBehavior.RegisterUser(userInfo, replyTo))
-            .map {
-              case RegisterSuccess =>
-                complete(JsObject("code" -> JsNumber(0), "msg" -> JsString("success")))
-              case UsernameExist =>
-                complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"username ${usernameOpt.get} registered by other users")))
-              case PhoneNumberExist =>
-                complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"phoneNumber ${phoneNumberOpt.get} registered by other users")))
-              case EmailExist =>
-                complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"email ${emailOpt.get} registered by other users")))
-            }
-        }
-
-        onComplete(registerResultF) {
+          onComplete(registerResultF) {
             case Failure(e) =>
               this.log.warn("registerResult future failed, msg: {}, stack: {}", e.getMessage, e.getStackTrace)
               complete(status = StatusCodes.InternalServerError, JsObject("code" -> JsNumber(1), "msg" -> JsString(e.getMessage)))
             case Success(registerResult) => registerResult
           }
+        }
     }
   }
 
