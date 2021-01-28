@@ -4,34 +4,17 @@ networks:
     external:
       name: freeriver
 services:
-  user-service1:
+  user-service:
     image: colinzeng/user-service:test-0.1.0
     container_name: user-service1
     restart: always
     ports:
       - 9091:80
     environment:
-      - HOST_NAME=user-service1
-      - SEED_NODES.0=akka://user-service@user-service1:2551
-      - SEED_NODES.1=akka://user-service@user-service2:2551
+      - HOST_NAME=user-service
+      - SEED_NODES.0=akka://user-service@user-service:2551
       - JWT_ISSUER=freeriver.cn
       - JWT_SECRET=99b57e9b8880bc5d4d799b508603628c37c3e6a0d4bdd0988e9dc3ad8e04c495
-      - TOKEN_EXPIRE_DURATION=10m
-      - MAX_ONLINE_USERS_LIMIT=1
-      - CASSANDRA_CONTRACT_POINTS.0=cassandra1:9042
-  user-service2:
-    image: colinzeng/user-service:test-0.1.0
-    container_name: user-service2
-    restart: always
-    ports:
-      - 9092:80
-    environment:
-      - HOST_NAME=user-service2
-      - SEED_NODES.0=akka://user-service@user-service1:2551
-      - SEED_NODES.1=akka://user-service@user-service2:2551
-      - JWT_ISSUER=freeriver.cn
-      - JWT_PRIVATE_KEY
-      - JWT_PUBLIC_KEY
       - TOKEN_EXPIRE_DURATION=10m
       - MAX_ONLINE_USERS_LIMIT=1
       - CASSANDRA_CONTRACT_POINTS.0=cassandra1:9042
