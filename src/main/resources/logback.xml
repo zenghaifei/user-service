@@ -19,7 +19,7 @@
         <encoder>
             <pattern>%date{yyyy-MM-dd HH:mm:ss.SSS} [%level] [%logger] - %msg%n</pattern>
         </encoder>
-    </appender>ma
+    </appender>
 
     <appender name="ASYNC" class="ch.qos.logback.classic.AsyncAppender">
         <discardingThreshold>0</discardingThreshold>
