@@ -33,6 +33,7 @@ lazy val root = (project in file(".")).
       "ch.qos.logback" % "logback-classic" % "1.2.3",
       "com.auth0" % "java-jwt" % "3.10.3",
       "org.bouncycastle" % "bcprov-jdk16" % "1.46",
+      "com.google.zxing" % "core" % "3.4.1",
       "com.github.swagger-akka-http" %% "swagger-akka-http" % "2.2.0",
       "co.pragmati" %% "swagger-ui-akka-http" % "1.4.0"
     ),

@@ -5,8 +5,8 @@ import akka.cluster.sharding.typed.scaladsl.ClusterSharding
 import akka.http.scaladsl.Http
 import com.github.swagger.akka.SwaggerSite
 import projections.UsersManagerProjection
-import routes.{AuthRouter, UserRouter}
-import services.{JwtService, MessagesService}
+import routes.{AuthRouter, QrCodeRouter, UserRouter}
+import services.{JwtService, MessagesService, QrCodeService}
 
 object App extends SwaggerSite {
 
@@ -25,7 +25,9 @@ object App extends SwaggerSite {
       val authRoute = new AuthRouter(jwtService).routes
       val messagesService = new MessagesService(config)
       val userRoute = new UserRouter(messagesService).routes
-      val routes = concat(authRoute, userRoute)
+      val qrCodeService = new QrCodeService()
+      val qrCodeRoute = new QrCodeRouter(qrCodeService).routes
+      val routes = concat(authRoute, userRoute, qrCodeRoute)
       val host = "0.0.0.0"
       val port = config.getInt("server.port")
       Http().newServerAt(host, port).bind(routes)
