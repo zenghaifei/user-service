@@ -5,6 +5,7 @@ import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, Behavior, PostStop, SupervisorStrategy}
 import akka.cluster.sharding.typed.ShardingEnvelope
 import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, Entity, EntityRef, EntityTypeKey}
+import akka.pattern.StatusReply
 import akka.persistence.typed.PersistenceId
 import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, RetentionCriteria}
 import constants.UserRoles
@@ -25,7 +26,7 @@ object UserTokenEntity {
   // command
   sealed trait Command extends JacksonCborSerializable
 
-  final case class GenerateToken(ip: String, userAgent: String, replyTo: ActorRef[GeneratedToken]) extends Command
+  final case class GenerateToken(ip: String, userAgent: String, replyTo: ActorRef[StatusReply[String]]) extends Command
 
   final case class GetLatestTokenInfo(replyTo: ActorRef[LatestTokenInfo]) extends Command
 
@@ -35,8 +36,6 @@ object UserTokenEntity {
 
   // reply
   sealed trait Reply extends JacksonCborSerializable
-
-  final case class GeneratedToken(value: String) extends Reply
 
   final case class LatestTokenInfo(tokenId: Long, expireTime: LocalDateTime) extends Reply
 
@@ -66,7 +65,7 @@ object UserTokenEntity {
           val newTokenId = getLatestTokenId + 1
           val token = jwtService.generateToken(UserRoles.END_USER, userId, newTokenId)
           val tokenGenerated = TokenGenerated(newTokenId, LocalDateTime.now(), ip, userAgent)
-          Effect.persist(tokenGenerated).thenReply(replyTo)(_ => GeneratedToken(token))
+          Effect.persist(tokenGenerated).thenReply(replyTo)(_ => StatusReply.Success(token))
         case GetLatestTokenInfo(replyTo) =>
           context.log.info("get user latest token info request received, userId: {}", userId)
           Effect.none.thenReply(replyTo)(_ => LatestTokenInfo(getLatestTokenId, getLatestTokenExpireTime))

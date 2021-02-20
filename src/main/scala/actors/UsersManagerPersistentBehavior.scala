@@ -3,6 +3,7 @@ package actors
 import akka.actor.typed.scaladsl.Behaviors
 import akka.actor.typed.{ActorRef, ActorSystem, Behavior, SupervisorStrategy}
 import akka.cluster.typed.{ClusterSingleton, SingletonActor}
+import akka.pattern.StatusReply
 import akka.persistence.typed.PersistenceId
 import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, RetentionCriteria}
 
@@ -23,11 +24,11 @@ object UsersManagerPersistentBehavior {
 
   sealed trait GetUserId extends Command
 
-  final case class GetUserIdByUsername(username: String, replyTo: ActorRef[GetUserIdResult]) extends GetUserId
+  final case class GetUserIdByUsername(username: String, replyTo: ActorRef[StatusReply[Long]]) extends GetUserId
 
-  final case class GetUserIdByPhoneNumber(phoneNumber: String, replyTo: ActorRef[GetUserIdResult]) extends GetUserId
+  final case class GetUserIdByPhoneNumber(phoneNumber: String, replyTo: ActorRef[StatusReply[Long]]) extends GetUserId
 
-  final case class GetUserIdByEmail(email: String, replyTo: ActorRef[GetUserIdResult]) extends GetUserId
+  final case class GetUserIdByEmail(email: String, replyTo: ActorRef[StatusReply[Long]]) extends GetUserId
 
   final case class UserInfo(var userId: Long = 0L, username: String, password: String, phoneNumber: String, email: String,
                             nickname: String, gender: String, address: String, icon: String, introduction: String)
@@ -36,13 +37,6 @@ object UsersManagerPersistentBehavior {
 
   // reply
   sealed trait Reply extends JacksonCborSerializable
-
-  sealed trait GetUserIdResult extends Reply
-
-  final case class GetUserIdSuccess(userId: Long) extends GetUserIdResult
-
-  final case object UserNotFound extends GetUserIdResult
-
 
   sealed trait RegisterResult extends Reply
 
@@ -78,9 +72,9 @@ object UsersManagerPersistentBehavior {
           }
           userIdOpt match {
             case Some(userId) =>
-              replyTo ! GetUserIdSuccess(userId)
+              replyTo ! StatusReply.Success(userId)
             case None =>
-              replyTo ! UserNotFound
+              replyTo ! StatusReply.Error("user not found")
           }
           Effect.none
         case RegisterUser(userInfo, replyTo) =>

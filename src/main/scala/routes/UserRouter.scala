@@ -13,6 +13,7 @@ import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport
 import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.{Route, StandardRoute}
+import akka.pattern.StatusReply
 import akka.util.Timeout
 import constants.DefinedHeaders
 import services.MessagesService
@@ -55,7 +56,7 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
 
   private def getOnlineUserCount = (get & path("user" / "public" / "online" / "count")) {
     val onlineUsersActor = OnlineUsersBehavior.initSingleton(system)
-    val onlineUserCountF = onlineUsersActor.ask(replyTo => GetOnlineUserCount(replyTo)).map(_.count)
+    val onlineUserCountF = onlineUsersActor.ask(replyTo => GetOnlineUserCount(replyTo)).map(_.getValue)
     onComplete(onlineUserCountF) {
       case Success(count) =>
         complete(JsObject("code" -> JsNumber(0),
@@ -74,7 +75,7 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
         val now = LocalDateTime.now()
         val overdueTime = now.plus(this.registrationEmailCodeOverdueDuration)
         val emailCodeF = emailCodeEntity.ask(replyTo => EmailCodeEntity.GenerateEmailCode(overdueTime, replyTo))
-          .map(_.code)
+          .map(_.getValue)
         val sendEmailF = emailCodeF.flatMap { emailCode =>
           this.messagesService.sendInstantEmail(email, "注册邮箱验证码", s"您的注册邮箱验证码是<b>${emailCode}</b>", now, overdueTime)
         }
@@ -100,7 +101,7 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
               emailCodeOpt.fold(Future(false)) { emailCode =>
                 val emailCodeEntity = EmailCodeEntity.selectEntity(email, this.clusterSharding)
                 emailCodeEntity.ask(replyTo => EmailCodeEntity.GetEmailCode(replyTo))
-                  .map(_.codeData)
+                  .map(_.getValue)
                   .map { case EmailCodeEntity.CodeData(code, overdueTime) =>
                     if (overdueTime.isBefore(LocalDateTime.now()))
                       false
@@ -164,7 +165,7 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
       extractClientIP { clientRemoteAddress =>
         entity(as[LoginRequest]) { case LoginRequest(userIdentifier, password) =>
           lazy val usersManagerActor = UsersManagerPersistentBehavior.initSingleton(system)
-          val userIdResultF =
+          val userIdResultF: Future[StatusReply[Long]] =
             if (StringUtils.isValidCnPhoneNumberFormat(userIdentifier)) {
               usersManagerActor.ask(ref => GetUserIdByPhoneNumber(userIdentifier, ref))
             }
@@ -175,23 +176,15 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
               usersManagerActor.ask(ref => GetUserIdByUsername(userIdentifier, ref))
             }
             else {
-              Future(UserNotFound)
+              Future(StatusReply.Error[Long]("user not exist"))
             }
 
           val loginVerifiedUserIdF = userIdResultF
-            .flatMap {
-              case GetUserIdSuccess(userId) => Future.successful(userId)
-              case UserNotFound => Future.failed(new Exception("user not found"))
-            }
+            .map(_.getValue)
             .flatMap { userId: Long =>
               val userEntity = UserInfoEntity.selectEntity(userId, clusterSharding)
               userEntity.ask(ref => GetUserInfo(ref))
-                .map {
-                  case GetUserInfoFailed(msg) =>
-                    this.log.warn("unexpected get user info failed, msg: {}", msg)
-                    throw new Exception(msg)
-                  case userInfo: UserInfoEntity.UserInfo => userInfo
-                }
+                .map(_.getValue)
             }
             .flatMap { userInfo: UserInfoEntity.UserInfo =>
               val hashedPassword = HashUtils.computeHashFromString(password, Sha256)
@@ -209,7 +202,7 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
               val clientIP: String = clientRemoteAddress.toOption.map(_.getHostAddress).getOrElse("unknown")
               val userAgent: String = userAgentOpt.getOrElse("unknown")
               userTokenEntity.ask(ref => GenerateToken(clientIP, userAgent, ref))
-                .map(_.value)
+                .map(_.getValue)
             }
 
           onComplete(generateTokenF) {
@@ -252,17 +245,26 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
           complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(s"no header ${DefinedHeaders.xForwardedUser}")))
         case Some(userId) =>
           val userInfoEntity = UserInfoEntity.selectEntity(userId, clusterSharding)
-          val userInfoResultF = userInfoEntity.ask(ref => GetUserInfo(ref))
-          onComplete(userInfoResultF) {
+          val userInfoStatusReplyF: Future[StatusReply[UserInfoEntity.UserInfo]] = userInfoEntity.ask(ref => GetUserInfo(ref))
+          onComplete(userInfoStatusReplyF) {
             case Failure(e) =>
               this.log.warn("get user info result future failed, userId: {}, msg: {}, stack: {}", userId, e.getMessage, e.getStackTrace)
               complete(status = StatusCodes.InternalServerError, JsObject("code" -> JsNumber(1), "msg" -> JsString(e.getMessage)))
-            case Success(userInfoResult) =>
-              userInfoResult match {
-                case GetUserInfoFailed(msg) =>
+            case Success(userInfoStatusReply) =>
+              userInfoStatusReply match {
+                case StatusReply.Error(ex) =>
                   this.log.warn("get user info failed, user not exist, userId: {}", userId)
-                  complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(msg)))
-                case UserInfoEntity.UserInfo(userId: Long, username: String, phoneNumber: String, email: String, loginPassword: String, nickname: String, gender: String, address: String, icon: String, introduction: String) =>
+                  complete(status = StatusCodes.BadRequest, JsObject("code" -> JsNumber(1), "msg" -> JsString(ex.getMessage)))
+                case StatusReply.Success(UserInfoEntity.UserInfo(userId: Long,
+                username: String,
+                phoneNumber: String,
+                email: String,
+                loginPassword: String,
+                nickname: String,
+                gender: String,
+                address: String,
+                icon: String,
+                introduction: String)) =>
                   complete(JsObject(
                     "code" -> JsNumber(0),
                     "msg" -> JsString("success"),

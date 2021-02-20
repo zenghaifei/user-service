@@ -3,6 +3,7 @@ package actors
 import akka.actor.typed.scaladsl.Behaviors
 import akka.actor.typed.{ActorRef, ActorSystem, Behavior, SupervisorStrategy}
 import akka.cluster.typed.{ClusterSingleton, SingletonActor}
+import akka.pattern.StatusReply
 
 import scala.collection.mutable
 
@@ -20,22 +21,11 @@ object OnlineUsersBehavior {
 
   final case class RegisterAsOffline(userId: Long) extends Command
 
-  final case class GetOnlineUserCount(replyTo: ActorRef[OnlineUserCount]) extends Command
+  final case class GetOnlineUserCount(replyTo: ActorRef[StatusReply[Int]]) extends Command
 
-  final case class ApplyForTokenGeneration(userId: Long, replyTo: ActorRef[TokenGenerationApplyResult]) extends Command
+  final case class ApplyForTokenGeneration(userId: Long, replyTo: ActorRef[StatusReply[Unit]]) extends Command
 
   final case class BroadcastMessageToOnlineUsers(message: String) extends Command
-
-  // reply
-  sealed trait Reply extends JacksonCborSerializable
-
-  final case class OnlineUserCount(count: Int) extends Reply
-
-  sealed trait TokenGenerationApplyResult extends Reply
-
-  final case object TokenGenerationAllowed extends TokenGenerationApplyResult
-
-  final case object TokenGenerationRejected extends TokenGenerationApplyResult
 
   def apply(): Behavior[Command] = Behaviors.setup { context =>
     context.log.info("starting OnlineUsers actor")
@@ -49,19 +39,19 @@ object OnlineUsersBehavior {
           updated(users.subtractOne(userId), userCount - 1)
         case ApplyForTokenGeneration(userId, replyTo) =>
           if (users.contains(userId)) {
-            replyTo ! TokenGenerationAllowed
+            replyTo ! StatusReply.Success()
             Behaviors.same
           }
           else if (userCount < maxOnlineLimit) {
-            replyTo ! TokenGenerationAllowed
+            replyTo ! StatusReply.Success()
             updated(users.addOne(userId), userCount + 1)
           }
           else {
-            replyTo ! TokenGenerationRejected
+            replyTo ! StatusReply.Error("not allowed")
             Behaviors.same
           }
         case GetOnlineUserCount(replyTo) =>
-          replyTo ! OnlineUserCount(userCount)
+          replyTo ! StatusReply.Success(userCount)
           Behaviors.same
         case BroadcastMessageToOnlineUsers(message) =>
           // TODO: 待实现websocket发消息

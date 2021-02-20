@@ -1,12 +1,12 @@
 package projections
 
-import actors.UserInfoEntity.{InitFailed, InitSuccess}
 import actors.UsersManagerPersistentBehavior.{UserInfo, UserRegistered}
 import actors._
 import akka.Done
 import akka.actor.typed.ActorSystem
 import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, ShardedDaemonProcess}
 import akka.event.slf4j.SLF4JLogging
+import akka.pattern.StatusReply
 import akka.persistence.cassandra.query.scaladsl.CassandraReadJournal
 import akka.projection.cassandra.scaladsl.CassandraProjection
 import akka.projection.eventsourced.EventEnvelope
@@ -60,11 +60,11 @@ class UsersManagerHander(system: ActorSystem[_]) extends Handler[EventEnvelope[U
         val userInfo1 = UserInfoEntity.UserInfo(userId, username, phoneNumber, email, password, nickname, gender, address, icon, introduction)
         userInfoEntity.ask(ref => UserInfoEntity.Init(userInfo1, ref))
           .map {
-            case InitFailed(msg) =>
-              log.warn("initfailed, userId: {}, msg: {}", userId, msg)
-              Done
-            case InitSuccess =>
+            case StatusReply.Success(_) =>
               log.debug("initSuccess")
+              Done
+            case StatusReply.Error(ex)=>
+              log.warn("initfailed, userId: {}, msg: {}", userId, ex.getMessage)
               Done
           }
     }

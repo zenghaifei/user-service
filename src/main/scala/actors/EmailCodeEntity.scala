@@ -4,6 +4,7 @@ import akka.actor.typed.scaladsl.Behaviors
 import akka.actor.typed.{ActorRef, Behavior, SupervisorStrategy}
 import akka.cluster.sharding.typed.ShardingEnvelope
 import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, Entity, EntityRef, EntityTypeKey}
+import akka.pattern.StatusReply
 import akka.persistence.typed.PersistenceId
 import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, RetentionCriteria}
 import utils.StringUtils
@@ -20,27 +21,16 @@ import scala.concurrent.duration.DurationInt
  */
 object EmailCodeEntity {
 
+  final case class CodeData(code: String, overdueTime: LocalDateTime)
+
   // command
   sealed trait Command extends JacksonCborSerializable
 
-  final case class GenerateEmailCode(overdueTime: LocalDateTime, replyTo: ActorRef[GenerateCodeResult]) extends Command
+  final case class GenerateEmailCode(overdueTime: LocalDateTime, replyTo: ActorRef[StatusReply[String]]) extends Command
 
-  final case class GetEmailCode(replyTo: ActorRef[GetEmailCodeResult]) extends Command
+  final case class GetEmailCode(replyTo: ActorRef[StatusReply[CodeData]]) extends Command
 
-  final case class InvalidateEmailCode(replyTo: ActorRef[InvalidateResult]) extends Command
-
-  // reply
-  sealed trait Reply extends JacksonCborSerializable
-
-  final case class GenerateCodeResult(code: String) extends Reply
-
-  final case class CodeData(code: String, overdueTime: LocalDateTime)
-
-  final case class GetEmailCodeResult(codeData: CodeData) extends Reply
-
-  sealed trait InvalidateResult extends Reply
-
-  final case object InvalidateSuccess extends InvalidateResult
+  final case class InvalidateEmailCode(replyTo: ActorRef[StatusReply[Unit]]) extends Command
 
   // event
   sealed trait Event extends JacksonJsonSerializable
@@ -59,11 +49,11 @@ object EmailCodeEntity {
         case GenerateEmailCode(overdueTime, replyTo) =>
           val code = StringUtils.generateEmailCode().toLowerCase
           val codeGenerated = EmailCodeGenerated(code, overdueTime)
-          Effect.persist(codeGenerated).thenReply(replyTo)(_ => GenerateCodeResult(code))
+          Effect.persist(codeGenerated).thenReply(replyTo)(_ => StatusReply.Success(code))
         case GetEmailCode(replyTo) =>
-          Effect.none.thenReply(replyTo)(_ => GetEmailCodeResult(this.codeData))
+          Effect.none.thenReply(replyTo)(_ => StatusReply.Success(this.codeData))
         case InvalidateEmailCode(replyTo) =>
-          Effect.persist(EmailCodeInvalidated).thenReply(replyTo)(_ => InvalidateSuccess)
+          Effect.persist(EmailCodeInvalidated).thenReply(replyTo)(_ => StatusReply.Success())
       }
     }
 

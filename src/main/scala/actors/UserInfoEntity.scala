@@ -1,9 +1,11 @@
 package actors
 
+import actors.UsersManagerPersistentBehavior.UserInfo
 import akka.actor.typed.scaladsl.Behaviors
 import akka.actor.typed.{ActorRef, Behavior, SupervisorStrategy}
 import akka.cluster.sharding.typed.ShardingEnvelope
 import akka.cluster.sharding.typed.scaladsl.{ClusterSharding, Entity, EntityRef, EntityTypeKey}
+import akka.pattern.StatusReply
 import akka.persistence.typed.PersistenceId
 import akka.persistence.typed.scaladsl.{Effect, EventSourcedBehavior, RetentionCriteria}
 
@@ -18,30 +20,20 @@ import scala.concurrent.duration.DurationInt
  */
 object UserInfoEntity {
 
+  final case class UserInfo(userId: Long, username: String, phoneNumber: String, email: String, loginPassword: String,
+                            var nickname: String, var gender: String, var address: String, var icon: String, var introduction: String)
+
   // command
   sealed trait Command extends JacksonCborSerializable
 
-  final case class Init(userInfo: UserInfo, replyTo: ActorRef[InitResult]) extends Command
+  final case class Init(userInfo: UserInfo, replyTo: ActorRef[StatusReply[Unit]]) extends Command
 
-  final case class GetUserInfo(replyTo: ActorRef[GetUserInfoResult]) extends Command
+  final case class GetUserInfo(replyTo: ActorRef[StatusReply[UserInfo]]) extends Command
 
   final case class ModifyUserInfo(nickname: String, gender: String, address: String, icon: String, introduction: String, replyTo: ActorRef[ModifyUserInfoResult]) extends Command
 
   // reply
   sealed trait Reply extends JacksonCborSerializable
-
-  sealed trait InitResult extends Reply
-
-  final case object InitSuccess extends InitResult
-
-  final case class InitFailed(msg: String) extends InitResult
-
-  sealed trait GetUserInfoResult extends Reply
-
-  final case class UserInfo(userId: Long, username: String, phoneNumber: String, email: String, loginPassword: String,
-                            var nickname: String, var gender: String, var address: String, var icon: String, var introduction: String) extends GetUserInfoResult
-
-  final case class GetUserInfoFailed(msg: String) extends GetUserInfoResult
 
   sealed trait ModifyUserInfoResult extends Reply
 
@@ -70,14 +62,14 @@ object UserInfoEntity {
       command match {
         case Init(userInfo, replyTo) =>
           if (userInfo.userId != userId) {
-            Effect.none.thenReply(replyTo)(_ => InitFailed("userId not match"))
+            Effect.none.thenReply(replyTo)(_ => StatusReply.Error("userId not match"))
           }
           else {
             val inited = Inited(userInfo)
-            Effect.persist(inited).thenReply(replyTo)(_ => InitSuccess)
+            Effect.persist(inited).thenReply(replyTo)(_ => StatusReply.Success())
           }
         case GetUserInfo(replyTo) =>
-          Effect.none.thenReply(replyTo)(_ => GetUserInfoFailed("no userInfo on [NotInitedState]"))
+          Effect.none.thenReply(replyTo)(_ => StatusReply.Error("no userInfo on [NotInitedState]"))
         case ModifyUserInfo(nickname, gender, address, icon, introduction, replyTo) =>
           Effect.none.thenReply(replyTo)(_ => ModifyUserInfoFailed)
       }
@@ -94,9 +86,9 @@ object UserInfoEntity {
     override def applyCommand(command: Command, userId: Long): Effect[Event, State] = {
       command match {
         case Init(_, replyTo) =>
-          Effect.none.thenReply(replyTo)(_ => InitSuccess)
+          Effect.none.thenReply(replyTo)(_ => StatusReply.Success())
         case GetUserInfo(replyTo) =>
-          Effect.none.thenReply(replyTo)(_ => userInfo)
+          Effect.none.thenReply(replyTo)(_ => StatusReply.Success(userInfo))
         case ModifyUserInfo(nickname, gender, address, icon, introduction, replyTo) =>
           Effect.persist(UserInfoModified(nickname, gender, address, icon, introduction)).thenReply(replyTo)(_ => ModifyUserInfoSuccess)
       }
