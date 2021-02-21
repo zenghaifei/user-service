@@ -289,7 +289,7 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
         case Some(userId) =>
           entity(as[ModifyUserInfoRequest]) { request =>
             val userInfoEntity = UserInfoEntity.selectEntity(userId, clusterSharding)
-            val modifyResultF: Future[Unit] = userInfoEntity.ask[ModifyUserInfoResult](ref => ModifyUserInfo(
+            val modifyResultF: Future[Unit] = userInfoEntity.ask[StatusReply[Unit]](ref => ModifyUserInfo(
               nickname = request.nickname.getOrElse(""),
               gender = request.gender.getOrElse(""),
               address = request.address.getOrElse(""),
@@ -297,11 +297,7 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
               introduction = request.introduction.getOrElse(""),
               replyTo = ref
             ))
-              .flatMap {
-                case ModifyUserInfoFailed =>
-                  Future.failed(new Exception("ModifyUserInfoFailed response"))
-                case ModifyUserInfoSuccess => Future()
-              }
+              .map(_.getValue)
             onComplete(modifyResultF) {
               case Failure(ex) =>
                 log.warn("ask userInfoEntity failed, msg: {}, stack: {}", ex.getMessage, ex.getStackTrace)

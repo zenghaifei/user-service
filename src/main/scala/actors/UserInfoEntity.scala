@@ -19,8 +19,16 @@ import scala.concurrent.duration.DurationInt
  */
 object UserInfoEntity {
 
-  final case class UserInfo(userId: Long, username: String, phoneNumber: String, email: String, loginPassword: String,
-                            var nickname: String, var gender: String, var address: String, var icon: String, var introduction: String)
+  final case class UserInfo(userId: Long,
+                            username: String,
+                            phoneNumber: String,
+                            email: String,
+                            loginPassword: String,
+                            var nickname: String,
+                            var gender: String,
+                            var address: String,
+                            var icon: String,
+                            var introduction: String)
 
   // command
   sealed trait Command extends JacksonCborSerializable
@@ -29,88 +37,44 @@ object UserInfoEntity {
 
   final case class GetUserInfo(replyTo: ActorRef[StatusReply[UserInfo]]) extends Command
 
-  final case class ModifyUserInfo(nickname: String, gender: String, address: String, icon: String, introduction: String, replyTo: ActorRef[ModifyUserInfoResult]) extends Command
-
-  // reply
-  sealed trait Reply extends JacksonCborSerializable
-
-  sealed trait ModifyUserInfoResult extends Reply
-
-  final case object ModifyUserInfoSuccess extends ModifyUserInfoResult
-
-  final case object ModifyUserInfoFailed extends ModifyUserInfoResult
+  final case class ModifyUserInfo(nickname: String,
+                                  gender: String,
+                                  address: String,
+                                  icon: String,
+                                  introduction: String,
+                                  replyTo: ActorRef[StatusReply[Unit]]) extends Command
 
   // event
   sealed trait Event extends JacksonJsonSerializable
 
   final case class Inited(userInfo: UserInfo) extends Event
 
-  final case class UserInfoModified(nickname: String, gender: String, address: String, icon: String, introduction: String) extends Event
+  final case class UserInfoModified(nickname: String,
+                                    gender: String,
+                                    address: String,
+                                    icon: String,
+                                    introduction: String) extends Event
 
   // state
-  sealed trait State extends JacksonCborSerializable {
-
-    def applyCommand(command: Command, userId: Long): Effect[Event, State]
-
-    def applyEvent(event: Event): State
-  }
-
-  final case object NotInitedState extends State {
-
-    override def applyCommand(command: Command, userId: Long): Effect[Event, State] = {
-      command match {
-        case Init(userInfo, replyTo) =>
-          if (userInfo.userId != userId) {
-            Effect.none.thenReply(replyTo)(_ => StatusReply.Error("userId not match"))
-          }
-          else {
-            val inited = Inited(userInfo)
-            Effect.persist(inited).thenReply(replyTo)(_ => StatusReply.Success())
-          }
-        case GetUserInfo(replyTo) =>
-          Effect.none.thenReply(replyTo)(_ => StatusReply.Error("no userInfo on [NotInitedState]"))
-        case ModifyUserInfo(nickname, gender, address, icon, introduction, replyTo) =>
-          Effect.none.thenReply(replyTo)(_ => ModifyUserInfoFailed)
-      }
-    }
-
-    override def applyEvent(event: Event): State = event match {
+  final case class State(userInfo: Option[UserInfo]) extends JacksonCborSerializable {
+    def applyEvent(event: Event): State = event match {
       case Inited(userInfo) =>
-        InitedState(userInfo)
-    }
-  }
-
-  final case class InitedState(userInfo: UserInfo) extends State {
-
-    override def applyCommand(command: Command, userId: Long): Effect[Event, State] = {
-      command match {
-        case Init(_, replyTo) =>
-          Effect.none.thenReply(replyTo)(_ => StatusReply.Success())
-        case GetUserInfo(replyTo) =>
-          Effect.none.thenReply(replyTo)(_ => StatusReply.Success(userInfo))
-        case ModifyUserInfo(nickname, gender, address, icon, introduction, replyTo) =>
-          Effect.persist(UserInfoModified(nickname, gender, address, icon, introduction)).thenReply(replyTo)(_ => ModifyUserInfoSuccess)
-      }
-    }
-
-    override def applyEvent(event: Event): State = event match {
-      case Inited(_) =>
-        throw new IllegalArgumentException(s"Unexpected event [$event] on [InitedState]")
+        State(Some(userInfo))
       case UserInfoModified(nickname, gender, address, icon, introduction) =>
         if (!nickname.isEmpty) {
-          this.userInfo.nickname = nickname
+          this.userInfo.foreach(item => item.nickname = nickname)
         }
         if (!gender.isEmpty) {
-          this.userInfo.gender = gender
+          this.userInfo.foreach(item => item.gender = gender)
         }
         if (!address.isEmpty) {
-          this.userInfo.address = address
+          this.userInfo.foreach(item => item.address = address)
         }
         if (!icon.isEmpty) {
-          this.userInfo.icon = icon
+          this.userInfo.foreach(item => item.icon = icon)
         }
         if (!introduction.isEmpty) {
-          this.userInfo.introduction = introduction
+          this.userInfo.foreach(item => item.introduction = introduction)
         }
         this
     }
@@ -133,8 +97,39 @@ object UserInfoEntity {
 
     EventSourcedBehavior[Command, Event, State](
       persistenceId = persistenceId,
-      emptyState = NotInitedState,
-      commandHandler = (state, command) => state.applyCommand(command, userId),
+      emptyState = State(userInfo = None),
+      commandHandler = (state, command) => {
+        command match {
+          case Init(userInfo, replyTo) =>
+            if (userInfo.userId != userId) {
+              Effect.none.thenReply(replyTo)(_ => StatusReply.Error("userId not match"))
+            }
+            else {
+              state.userInfo match {
+                case Some(_) =>
+                  Effect.none.thenReply(replyTo)(_ => StatusReply.Error("already inited"))
+                case None =>
+                  val inited = Inited(userInfo)
+                  Effect.persist(inited).thenReply(replyTo)(_ => StatusReply.Success())
+              }
+            }
+          case GetUserInfo(replyTo) =>
+            state.userInfo match {
+              case None =>
+                Effect.none.thenReply(replyTo)(_ => StatusReply.Error("user not exist"))
+              case Some(userInfo) =>
+                Effect.none.thenReply(replyTo)(_ => StatusReply.Success(userInfo))
+            }
+          case ModifyUserInfo(nickname, gender, address, icon, introduction, replyTo) =>
+            state.userInfo match {
+              case None =>
+                Effect.none.thenReply(replyTo)(_ => StatusReply.Error("uninited user can't be modified"))
+              case Some(_) =>
+                Effect.persist(UserInfoModified(nickname, gender, address, icon, introduction))
+                  .thenReply(replyTo)(_ => StatusReply.Success())
+            }
+        }
+      },
       eventHandler = (state, event) => state.applyEvent(event)
     )
       .withRetention(RetentionCriteria.snapshotEvery(20, 1))
