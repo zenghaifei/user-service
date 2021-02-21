@@ -1,6 +1,5 @@
 package actors
 
-import actors.UsersManagerPersistentBehavior.UserInfo
 import akka.actor.typed.scaladsl.Behaviors
 import akka.actor.typed.{ActorRef, Behavior, SupervisorStrategy}
 import akka.cluster.sharding.typed.ShardingEnvelope

@@ -202,7 +202,6 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
               val clientIP: String = clientRemoteAddress.toOption.map(_.getHostAddress).getOrElse("unknown")
               val userAgent: String = userAgentOpt.getOrElse("unknown")
               userTokenEntity.ask(ref => GenerateToken(clientIP, userAgent, ref))
-                .map(_.getValue)
             }
 
           onComplete(generateTokenF) {

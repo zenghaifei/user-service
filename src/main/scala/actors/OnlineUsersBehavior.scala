@@ -19,37 +19,30 @@ object OnlineUsersBehavior {
   // command
   sealed trait Command extends JacksonCborSerializable
 
+  final case class RegisterAsOnline(userId: Long) extends Command
+
   final case class RegisterAsOffline(userId: Long) extends Command
 
   final case class GetOnlineUserCount(replyTo: ActorRef[StatusReply[Int]]) extends Command
-
-  final case class ApplyForTokenGeneration(userId: Long, replyTo: ActorRef[StatusReply[Unit]]) extends Command
 
   final case class BroadcastMessageToOnlineUsers(message: String) extends Command
 
   def apply(): Behavior[Command] = Behaviors.setup { context =>
     context.log.info("starting OnlineUsers actor")
-    val config = context.system.settings.config
-    val maxOnlineLimit = config.getInt("users.max-online-limit")
 
     def updated(users: mutable.TreeSet[Long], userCount: Int): Behavior[Command] =
       Behaviors.receiveMessage[Command] {
-        case RegisterAsOffline(userId) =>
-          context.log.info("get RegisterAsOffline msg, userId: {}", userId)
-          updated(users.subtractOne(userId), userCount - 1)
-        case ApplyForTokenGeneration(userId, replyTo) =>
-          if (users.contains(userId)) {
-            replyTo ! StatusReply.Success()
-            Behaviors.same
-          }
-          else if (userCount < maxOnlineLimit) {
-            replyTo ! StatusReply.Success()
+        case RegisterAsOnline(userId) =>
+          context.log.info("registerAsOnline msg, userId: {}", userId)
+          if (!users.contains(userId)) {
             updated(users.addOne(userId), userCount + 1)
           }
           else {
-            replyTo ! StatusReply.Error("not allowed")
             Behaviors.same
           }
+        case RegisterAsOffline(userId) =>
+          context.log.info("registerAsOffline msg, userId: {}", userId)
+          updated(users.subtractOne(userId), userCount - 1)
         case GetOnlineUserCount(replyTo) =>
           replyTo ! StatusReply.Success(userCount)
           Behaviors.same
