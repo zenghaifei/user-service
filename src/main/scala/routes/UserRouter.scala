@@ -271,6 +271,7 @@ class UserRouter(messagesService: MessagesService)(implicit ec: ExecutionContext
                       "userId" -> JsNumber(userId),
                       "nickname" -> JsString(nickname),
                       "gender" -> JsString(gender),
+                      "address" -> JsString(address),
                       "icon" -> JsString(icon),
                       "introduction" -> JsString(introduction)
                     )
